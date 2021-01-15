@@ -250,7 +250,7 @@ int listen(int sockfd, int backlog);
 
 ## TCP核心点
 
-![](network/timg.jpg)
+![](assets/timg.jpg)
 
 ### 建立链接
 
@@ -258,7 +258,7 @@ int listen(int sockfd, int backlog);
 
 断开连接是一个4次挥手的过程，目的在于通信双发都确定自己通信结束，并且数据包在网络中不再存在。
 
-![](network/fourwave.png)
+![](assets/fourwave.png)
 
 **TIME_WAIT**
 
@@ -294,7 +294,7 @@ int listen(int sockfd, int backlog);
 
 状态变更和队列:
 
-![](network/syns_accept_queue.png)
+![](assets/syns_accept_queue.png)
 
 - syns queue的大小由`net.ipv4.tcp_max_syn_backlog`参数决定
 - accept queue的大小由`listen(fd, backlog)`中的backlog参数和`net.core.somaxconn`参数一同决定，取最小值。

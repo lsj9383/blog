@@ -1,3 +1,4 @@
 # 博客
 
-- [Network](posts/network.md)
+- [KCP Guide](posts/kcp-guide/kcp-guide.md)
+- [Network](posts/network/network.md)
