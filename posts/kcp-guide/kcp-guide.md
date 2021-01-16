@@ -39,8 +39,6 @@
         - [Duplicate Segment](#duplicate-segment)
     - [超时探测](#超时探测)
         - [RTT](#rtt)
-            - [RTT 初始值](#rtt-初始值)
-            - [RTT 动态更新](#rtt-动态更新)
         - [RTO](#rto)
         - [重传二义性](#重传二义性)
     - [窗口](#窗口)
@@ -48,11 +46,6 @@
         - [发送窗口](#发送窗口)
         - [对端接收窗口](#对端接收窗口)
         - [拥塞窗口](#拥塞窗口)
-            - [拥塞窗口初始状态](#拥塞窗口初始状态)
-            - [慢启动](#慢启动)
-            - [拥塞控制](#拥塞控制)
-            - [Segment 超时](#segment-超时)
-            - [快速恢复](#快速恢复)
         - [探测](#探测)
     - [总结](#总结)
         - [KCP 的优点](#kcp-的优点)
@@ -171,6 +164,23 @@ KCP 原作者在 [KCP Best Practice](https://github.com/skywind3000/kcp/wiki/KCP
 因此对于使用 EPOLL 的场景，可以将下次调用 ikcp_update 的时间点注册到 EPOLL 超时时间中，使得 ikcp_update 可以被及时调用。
 
 观察源码后，没发现 `ikcp_check()` 和 `ikcp_update()` 之间的关系是微妙的，请参考 [Update 时机](#update-时机)。
+
+除了作者提供的建议外，还有一种较为极端的做法：
+
+- 设置 `kcp->interval=0`，这样会让 `ikcp_update()` 被任意时间点调用（否则 ikcp_update 的调用受 interval 的约束，请参考 [Update 时机](#update-时机)）。
+- 设置 EPOLL 超时时间为 x ms。
+- 触发读事件：
+  - 立即调用 `ikcp_input()` 通过 KCP 解析处理网络数据。
+  - 随后立即调用 `ikcp_update()`，主要目的触发端点发送 ACK（因为读事件触发很可能受因为收到了数据，因此需要立刻返回 ACK）。
+- EPOLL 超时：
+  - 重置超时时间。
+  - 调用 `ikcp_update()`：
+    - 探测对端接收窗口。
+    - 处理数据重发。
+    - 处理发送缓冲区的数据。
+- 应用需要发送数据：
+  - 立即调用 `ikcp_send()`。
+  - 随后立即调用 `ikcp_update()` 发送数据。
 
 ### Update 时机
 
