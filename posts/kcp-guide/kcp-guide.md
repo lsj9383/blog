@@ -1315,7 +1315,7 @@ snd_buf | 0 | 1 | 2 | 3 |   |   |   |   |   |
                      una               una+cwnd
 
 
-Send segment 4、5、6、7
+Send segment 4 5 6 7
 
                                          nxt
                                           |
