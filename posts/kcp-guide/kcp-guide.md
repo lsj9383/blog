@@ -497,7 +497,7 @@ data  |  I-  |  Lo  |  ve  |  -Y  |  ou  |  He  |  ll  |   o  |
 
 **注意：**
 
-- KCP 存在 Stream 模式，若开启 Stream 模式，则 frg 没有意义，全部填 0。若需要区分数据需要数据本身带有分隔符。
+- KCP 存在 Stream 模式，若开启 Stream 模式，则 frg 没有意义，全部填 0。
 
 ### 接收窗口
 
