@@ -45,7 +45,7 @@
         - [慢启动](#慢启动)
         - [拥塞避免](#拥塞避免)
         - [对于丢失的处理](#对于丢失的处理)
-        - [持续用塞](#持续用塞)
+        - [持续拥塞](#持续拥塞)
     - [存在的一些问题](#存在的一些问题)
     - [附录、Packet Types](#附录packet-types)
         - [Version Negotiation Packet](#version-negotiation-packet)
@@ -1609,7 +1609,7 @@ def on_packets_lost(self, packets: Iterable[QuicSentPacket], now: float) -> None
 
 AIOQUIC 中，若是位于慢启动阶段，出现丢失的情况，就会进入拥塞避免阶段，因为拥塞窗口肯定是大于等于慢启动阈值的。
 
-### 持续用塞
+### 持续拥塞
 
 如果一个 ACK 包有两个 Packet 被探测到丢失，就存在持续拥塞的可能，若满足以下条件（且关系），则触发持续拥塞：
 
