@@ -386,7 +386,7 @@ Long Header Packet {
 Type | Version | 名称 | 描述
 -|-|-|-
 0x0 | - | Initial | 用于建立连接，两端协商连接 ID，并发起 QUIC-TLS 握手。
-0x1 | - | 0-RTT | 用于 0-RTT 建立连接。
+0x1 | - | 0-RTT | 用于握手完成前，Client 将 early data 传递给 Server。
 0x2 | - | Handshake | Initial Packet 后会通过 Handshake 继续进行 QUIC-TLS 握手。
 0x3 | - | Retry | 服务器端要求地址验证，请参考[地址验证](#地址验证)。
 \- | 0x0 | Version Negotiation | 这是一种特殊的 Packet，不由 Type 决定，而是由 Version 决定，用于通信双发协商使用的 QUIC 版本，请参考[版本协商](#版本协商)。
