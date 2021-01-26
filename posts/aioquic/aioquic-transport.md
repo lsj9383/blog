@@ -40,14 +40,13 @@
     - [丢失探测](#丢失探测)
         - [估算往返时间](#估算往返时间)
         - [丢失检测](#丢失检测)
-            - [Packet 丢失](#packet-丢失)
-            - [探测超时](#探测超时)
     - [拥塞控制](#拥塞控制)
         - [初始状态](#初始状态)
         - [慢启动](#慢启动)
         - [拥塞避免](#拥塞避免)
         - [对于丢失的处理](#对于丢失的处理)
         - [持续拥塞](#持续拥塞)
+        - [Pacing](#pacing)
     - [错误处理](#错误处理)
         - [连接错误](#连接错误)
         - [Stream 错误](#stream-错误)
@@ -1626,6 +1625,30 @@ duration = (smoothed_rtt + max(4*rttvar, kGranularity) + max_ack_delay) *
 **注意：**
 
 在 AIOQUIC 中并未实现持续拥塞机制。
+
+### Pacing
+
+Pacing 是 QUIC Draft 中提到的一种速度控制机制，该机制的出发点是突然的大流量发送可能造成短暂的拥塞和丢包：
+
+> Sending multiple packets into the network without any delay between them creates a packet burst that might cause short-term congestion and losses.
+
+通过 Pacing 可以更均匀的发送数据包，其速率的计算方式是：
+
+```txt
+rate = N * congestion_window / smoothed_rtt
+```
+
+也可以表示为 Packet 间隔时间：
+
+```txt
+interval = packet_size / rate = smoothed_rtt * packet_size / congestion_window / N
+```
+
+在 AIOQUIC 的实现中，N=1，且 packet_size 为 1280 字节（即一个 UDP 报文的负载最大值）。
+
+**注意：**
+
+- Pacing 的速控对 ACK 无效，ACK 需要及时返回。
 
 ## 错误处理
 
