@@ -8,9 +8,12 @@
     - [密钥编码](#密钥编码)
         - [ASN.1](#asn1)
         - [DER](#der)
-        - [PKCS](#pkcs)
         - [PEM](#pem)
+        - [PKCS](#pkcs)
+            - [PKCS 1](#pkcs-1)
+            - [PKCS 8](#pkcs-8)
     - [Openssl 命令](#openssl-命令)
+    - [PEM 与 ne 转换](#pem-与-ne-转换)
     - [参考文献](#参考文献)
 
 <!-- /TOC -->
@@ -19,7 +22,44 @@
 
 本文主要记录了 RSA 基本知识、存储和传输格式以及 Openssl RSA 命令（后续如果有时间会补充 Openssl RSA 编程），以便快速查阅和回顾。
 
+RSA 算法会生成公钥和私钥，公钥加密的数据可以使用私钥解密，私钥加密的数据可以用于解密。
+
+公钥加密通常用于加密通信，私钥加密通常用于身份认证，本文并不会细数 RSA 在加密通信和身份认证中的应用。
+
 ## RSA 原理
+
+RSA 算法会生成公钥和私钥，公钥加密的数据可以使用私钥解密，私钥加密的数据可以用于解密。
+
+RSA 的公钥有两个变量（整数）确定：n 和 e。
+RSA 的私钥也有两个变量（整数）确定：n 和 d。
+
+使用公钥数据加密：
+
+```txt
+m^e mod n = c
+```
+
+- m 原始数据
+- c 加密数据
+- e 公钥 e
+- n 公钥 n
+
+使用私钥数据解密：
+
+```txt 
+c^d mod n = m
+```
+
+- c 加密数据
+- m 解密数据
+- d 私钥 d
+- n 私钥 n
+
+**注意：**
+
+- 公钥 n 和 私钥 n 是相等的。
+
+算法的原理细节可以参考阮一峰的 [RSA 算法原理（一）](http://www.ruanyifeng.com/blog/2013/06/rsa_algorithm_part_one.html) 和 [RSA 算法原理（二）](http://www.ruanyifeng.com/blog/2013/07/rsa_algorithm_part_two.html)
 
 ## 密钥编码
 
@@ -29,10 +69,14 @@ RSA 的密钥的编码会涉及到以下标准：
 
 - [ASN.1](#asn1) 用于定义和描述独立于特定计算机硬件的对象结构。属于 [X.680](https://www.itu.int/rec/T-REC-X.680) 标准。
 - [DER](#der) 用于将 ASN.1 描述的对象编码为具体的数据流规则。是 [X.690](https://www.itu.int/rec/T-REC-X.690/) 标准的一部分。
-- [PKCS](#pkcs) 公钥密码学标准，由多个部分组成。对于 RSA，我们需要关心的是 PKCS #1 和 PKCS #8：
+- [PEM](#pem) 为了方便 ASCII 系统中传输和存储密钥而定义的一种格式化标准。PEM 格式最终由 [RFC 7468](https://tools.ietf.org/html/rfc7468) 标准确定。
+- [PKCS](#pkcs) 公钥密码学标准，由多个部分组成。对于 RSA，我们需要关心的是 PKCS #1 以及 PKCS #8：
   - PKCS #1，通过 ASN.1 定义的 RSA 公钥和私钥的格式。
   - PKCS #8，通过 ASN.1 定义的 通用密钥格式。相比于 #1 仅用于 RSA，#8 可以用于多种密码学算法的密钥。
-- [PEM](#pem) 为了方便 ASCII 系统中传输和存储密钥而定义的一种格式化标准。
+
+**注意：**
+
+- 为了保障 RSA 公钥的安全性，还需要[公钥基础设施](https://en.wikipedia.org/wiki/Public_key_infrastructure)（Public key infrastructure, PKI）。
 
 ### ASN.1
 
@@ -95,23 +139,182 @@ DER 被用作最流行的编码格式，用于在文件中存储 X.509 证书。
 
 除了证书外，RSA 的公钥私钥也可以通过 DER 编码进行存储和传输。
 
+### PEM
+
+虽然通过 DER 已经可以得到 ASN.1 的编码数据，可以进行存储和传输，但是为了方便在 ASCII 系统（例如邮件）中进行传递和存储，又提出了 PEM 格式。
+
+PEM（增强隐私的邮件，Privacy-Enhanced Mail），该协议的初衷是在邮件中传递 DER 二进制数据，但是其文本编码格式广泛应用于各个领域。
+
+PEM 格式本质上是 DER 二进制数据进行 Base64 编码后得到的文本，并且附加页眉和页脚，以区分 DER 界限：
+
+- 页眉："----- BEGIN {LABEL} -----"。
+- 页脚："----- END {LABEL} -----"。
+- 不同类型的 DER，页眉页脚中的 LABEL 并不相同。
+
+这是一个 PEM 示例：
+
+```pem
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwZRDlZWn26KWf5BPnh4U
+dLxfqoNLnq/9GAhnmN/wUsZf936LKgMLE30cu576QitlqIO69dZ7WDPysfBcxA3H
+7UhlEtLtLNMnEFhKieU2GP2D2KPAHk/fdo2f+va9KIt6Nww3yiyIN6qM2s3hd/HL
+SLZEfvGoKPvucZ/12x4XaAVGPgNWAnf/hu36iHeqE2AHrUFiCiijSPfVQ3x8PIcx
+goffFoxVlPob+vMBjRDjNlHappAz/Cm46sKPdQ/ntLjoL+fLVcgnkYQ18bQizqIB
+xnFDs65x0k8WPoJL2PdILBebUQXs/Q3MtvDOUhwLWpNIJoDM4DmZmYzeXns3RLr+
+HQIDAQAB
+-----END PUBLIC KEY-----
+```
+
 ### PKCS
 
 公钥密码学标准（Public Key Cryptography Standards, PKCS）。
 
 虽然 PKCS 这里名称指的是 “公钥”，但实际上 PKCS 同时规定了公钥和私钥。
 
+#### PKCS 1
+
+PKCS #1 被称为 RSA Cryptography Specifications，定义了 RSA 加密技术相关标准。这里仅列出 PKCS #1 中密钥语法。
+
+- PKCS #1 RSA 公钥：
+  - ASN.1：
+
+    ```asn
+    RSAPublicKey ::= SEQUENCE {
+        modulus           INTEGER,  -- n
+        publicExponent    INTEGER   -- e
+    }
+    ```
+
+  - PEM 格式（其中 BASE64 ENCODED DATA 是 DER 的 Base64）：
+
+    ```txt
+    -----BEGIN RSA PUBLIC KEY-----
+    BASE64 ENCODED DATA
+    -----END RSA PUBLIC KEY-----
+    ```
+
+- PKCS #1 RSA 私钥：
+  - ASN.1：
+
+    ```asn
+    RSAPrivateKey ::= SEQUENCE {
+        version           Version,
+        modulus           INTEGER,  -- n
+        publicExponent    INTEGER,  -- e
+        privateExponent   INTEGER,  -- d
+        prime1            INTEGER,  -- p
+        prime2            INTEGER,  -- q
+        exponent1         INTEGER,  -- d mod (p-1)
+        exponent2         INTEGER,  -- d mod (q-1)
+        coefficient       INTEGER,  -- (inverse of q) mod p
+        otherPrimeInfos   OtherPrimeInfos OPTIONAL
+    }
+    ```
+
+ - PEM 格式（其中 BASE64 ENCODED DATA 是 DER 的 Base64）：
+
+    ```txt
+    -----BEGIN RSA PRIVATE KEY-----
+    BASE64 ENCODED DATA
+    -----END RSA PRIVATE KEY-----
+    ```
+
+更多细节请参考 [Public-Key Cryptography Standards (PKCS) #1](https://tools.ietf.org/html/rfc3447#section-9)。
+
+#### PKCS 8
+
+PKCS #8 Private-Key Information Syntax Standard，是私钥信息语法规范，不局限于 RSA，可以对多种私钥进行描述。
+
+PKCS #8 中对于私钥提供了进一步加密的安全性保障。
+
+- PKCS #8 公钥：
+
+  - ASN.1
+
+    ```asn
+    PublicKeyInfo ::= SEQUENCE {
+        algorithm       AlgorithmIdentifier,
+        PublicKey       BIT STRING
+    }
+
+    AlgorithmIdentifier ::= SEQUENCE {
+        algorithm       OBJECT IDENTIFIER,
+        parameters      ANY DEFINED BY algorithm OPTIONAL
+    }
+    ```
+
+    - 其中 algorithm 标识了采用的算法，如 RSA、AES。 
+    - 其中 PublicKey 是 PKCS #1 的 RSA 公钥 BER（若 Algorithm 是 RSA）。
+
+  - PEM
+
+    ```txt
+    -----BEGIN PUBLIC KEY-----
+    BASE64 ENCODED DATA
+    -----END PUBLIC KEY-----
+    ```
+
+- PKCS #8 私钥：
+
+  - 未加密私钥：
+  
+    - ASN.1
+
+      ```asn
+      PrivateKeyInfo ::= SEQUENCE {
+          version         Version,
+          algorithm       AlgorithmIdentifier,
+          PrivateKey      BIT STRING
+      }
+  
+      AlgorithmIdentifier ::= SEQUENCE {
+          algorithm       OBJECT IDENTIFIER,
+          parameters      ANY DEFINED BY algorithm OPTIONAL
+      }
+      ```
+
+      - 其中 algorithm 标识了采用的算法，如 RSA、AES。 
+      - 其中 PrivateKey 是 PKCS #1 的 RSA 私钥 BER。
+    
+    - PEM
+
+      ```txt
+      -----BEGIN PRIVATE KEY-----
+      BASE64 ENCODED DATA
+      -----END PRIVATE KEY-----
+      ```
+
+  - 加密私钥：
+
+    - ASN.1
+
+      ```ans
+      EncryptedPrivateKeyInfo ::= SEQUENCE {
+          encryptionAlgorithm  EncryptionAlgorithmIdentifier,
+          encryptedData        EncryptedData
+      }
+
+      EncryptionAlgorithmIdentifier ::= AlgorithmIdentifier
+
+      EncryptedData ::= OCTET STRING
+      ```
+
+      - 其中 encryptionAlgorithm 标识对私钥进行加密的加密算法。
+      - 其中 encryptedData 是私钥加密后的数据。原始数据是 PKCS #8 的未加密信息，即上文中的 `PrivateKeyInfo`。
+      - 加密的私钥受 Password 保护，在 Openssl 中生成加密私钥时会要求输入 Password，在使用加密私钥时也要求输入 Password。
+
+    - PEM
+
+      ```txt
+      -----BEGIN ENCRYPTED PRIVATE KEY-----
+      BASE64 ENCODED DATA
+      -----END ENCRYPTED PRIVATE KEY-----
+      ```
+
+
 **注意：**
 
-- 为了保障 RSA 公钥的安全性，还需要[公钥基础设施](https://en.wikipedia.org/wiki/Public_key_infrastructure)（Public key infrastructure, PKI）。
-
-### PEM
-
-若已有 PEM 文件，则可以通过 <http://phpseclib.sourceforge.net/x509/asn1parse.php> 以 ASN.1 格式打印。
-
-**注意：**
-
-- PKCS #8 的数据可能经过加密，无法通过 asn1parse.php 直接解析得到。
+- 虽然 PKCS #8 是私钥标准，但其实也定义了公钥。
 
 ## Openssl 命令
 
@@ -133,8 +336,22 @@ openssl 的 rsa 命令通常以 `openssl rsa` 或 `openssl genrsa` 开头。
 - 生成 RSA 的 private key：
 
   ```sh
+  # generate PKCS #1
   # openssl genrsa -out private_pkcs1.pem 2048
   openssl genrsa -out ${private_pkcs1.pem} ${bits}
+
+  # generate encrypted private key PKCS #1
+  # openssl genrsa -des3 -out encrypted_private_pkcs1.pem 2048
+  openssl genrsa -des3 -out ${encrypted_private_pkcs1.pem} ${bits}
+
+
+  # generate private key PKCS #8
+  # openssl genpkey -algorithm RSA -out private_pkcs8.pem 2048
+  openssl genpkey -algorithm RSA -out ${private_pkcs8.pem} ${bits}
+
+  # generate encrypted private key PKCS #8
+  # openssl genpkey -des3 -algorithm RSA -out encrypted_private_pkcs8.pem 2048
+  openssl genpkey -des3 -algorithm RSA -out ${encrypted_private_pkcs8.pem} ${bits}
   ```
 
 - 从 private key 提取 public key：
@@ -181,10 +398,39 @@ openssl 的 rsa 命令通常以 `openssl rsa` 或 `openssl genrsa` 开头。
   openssl rsa -in ${private_pkcs8.pem} -out ${private_pkcs1.pem}
   ```
 
+## PEM 与 ne 转换
+
+实际场景中，对于 RSA 公钥并非仅仅需要 RSA Public Key PEM，而是需要获得 Base64 encode 格式的 RSA n 和 e。并且往往也需要 RSA n 和 e 转换 RSA Public Key PEM（因为不少第三方库都直接依赖的 RSA Public Key PEM 而非 n 和 e）。
+
+例如 JWT 中通过 jku 暴露 JWKs，其中 RS256 算法（基于 RSA 的数字签名）的 n 和 e 是 Base64 格式的：
+
+```
+{
+    "keys": [{
+        "kty":"EC",
+        "crv":"P-256",
+        "x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+        "y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+        "use":"enc",
+        "kid":"1"
+    },{
+        "kty":"RSA",
+        "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+        "e":"AQAB",
+        "alg":"RS256",
+        "kid":"2011-04-29"
+    }]
+}
+```
+
+[pem_to_ne.py](pem_to_ne.py) 提供了 PKCS #8 RSA Public Key PEM 转换为 RSA Base64 n 和 e 的方法。
+
+
 ## 参考文献
 
 1. [RFC 3447(PKCS #1)](https://tools.ietf.org/html/rfc3447)
 1. [RFC 5208(PKCS #8)](https://tools.ietf.org/html/rfc5208)
+1. [RFC 7468(Textual Encodings of PKIX, PKCS, and CMS Structures)](https://tools.ietf.org/html/rfc7468)
 1. [PEM Wiki](https://en.wikipedia.org/wiki/Privacy-Enhanced_Mail)
 1. [ASN.1 Wiki](https://en.wikipedia.org/wiki/ASN.1)
 1. [PKCS Wiki](https://en.wikipedia.org/wiki/PKCS)
@@ -193,7 +439,9 @@ openssl 的 rsa 命令通常以 `openssl rsa` 或 `openssl genrsa` 开头。
 1. [Extract from Abstract Syntax Notation One (ASN.1) ](https://www.bgbm.org/TDWG/acc/Documents/asn1gloss.htm)
 1. [ASN.1 key structures in DER and PEM](https://tls.mbed.org/kb/cryptography/asn1-key-structures-in-der-and-pem)
 1. [公钥密码学标准](https://zh.wikipedia.org/wiki/%E5%85%AC%E9%92%A5%E5%AF%86%E7%A0%81%E5%AD%A6%E6%A0%87%E5%87%86)
+1. [ASN.1 key structures in DER and PEM](https://tls.mbed.org/kb/cryptography/asn1-key-structures-in-der-and-pem)
 1. [RSA 算法原理（一）](http://www.ruanyifeng.com/blog/2013/06/rsa_algorithm_part_one.html)
 1. [RSA 算法原理（二）](http://www.ruanyifeng.com/blog/2013/07/rsa_algorithm_part_two.html)
 1. [加密解密-RSA](https://www.shangyang.me/categories/%E8%AE%A1%E7%AE%97%E6%9C%BA%E7%A7%91%E5%AD%A6%E4%B8%8E%E6%8A%80%E6%9C%AF/%E5%8A%A0%E5%AF%86%E8%A7%A3%E5%AF%86/RSA/)
 1. [RSA 密钥格式解析](https://www.jianshu.com/p/c93a993f8997)
+1. [PEM, DER, CRT, and CER: X.509 Encodings and Conversions](https://www.ssl.com/guide/pem-der-crt-and-cer-x-509-encodings-and-conversions/)
