@@ -63,7 +63,7 @@ GQUIC 的特点：
 
 本文主要参考 [QUIC Wire Layout Specification](https://docs.google.com/document/d/1WJvyZflAO2pq77yOLbp9NsGjC1CHetAXV8I0fQe-B_U/edit#) 而进行的总结，该文档的版本范围适用于 Q043 及其以下版本。
 
-对于 Q043 以上的版本，在 Google QUIC 官方文档中并没有详细文档，我猜想这是由于 IQUIC 开始逐步替代 GQUIC 所致。
+对于 Q043 以上的版本，在 Google QUIC 官网中并没有详细文档，我猜想这是由于 IQUIC 开始逐步替代 GQUIC 所致。
 
 ## 连接与流
 
