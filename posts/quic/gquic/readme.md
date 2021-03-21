@@ -11,6 +11,7 @@
         - [断开连接](#断开连接)
         - [创建流](#创建流)
         - [断开流](#断开流)
+    - [GQUIC 加密](#gquic-加密)
     - [流量控制](#流量控制)
         - [Stream 流控](#stream-流控)
         - [Stream 流控更新策略](#stream-流控更新策略)
@@ -21,21 +22,7 @@
     - [拥塞控制](#拥塞控制)
     - [协议结构](#协议结构)
         - [Packet](#packet)
-            - [Version Negotiation Packet](#version-negotiation-packet)
-            - [Public Reset Packet](#public-reset-packet)
-            - [Regualr Packet](#regualr-packet)
         - [Frame](#frame)
-            - [STREAM Frame](#stream-frame)
-            - [ACK Frame](#ack-frame)
-            - [STOP_WAITING Frame](#stop_waiting-frame)
-            - [WINDOW_UPDATE Frame](#window_update-frame)
-            - [BLOCKED Frame](#blocked-frame)
-            - [CONGESTION_FEEDBACK Frame](#congestion_feedback-frame)
-            - [PADDING Frame](#padding-frame)
-            - [RST_STREAM Frame](#rst_stream-frame)
-            - [PING Frame](#ping-frame)
-            - [CONNECTION_CLOSE Frame](#connection_close-frame)
-            - [GOAWAY Frame](#goaway-frame)
         - [传输参数](#传输参数-1)
         - [Error Code](#error-code)
     - [Middlebox 解析 GQUIC](#middlebox-解析-gquic)
@@ -84,6 +71,16 @@ GQUIC 的特点：
 - 正常关闭，通过 STREAM Frame 中的 FIN Flag，表示该 Stream 的某个方向进行半关闭。当两个方向都进行关闭后，Stream 进行真正的关闭。
 - 异常关闭，通过 RST_STREAM Frame。
 - 连接关闭，当 Connection 关闭时，将隐式关闭连接中所有的 Stream。
+
+## GQUIC 加密
+
+本章节主要参考 [QUIC Crypto](https://docs.google.com/document/d/1g5nIXAIkN_Y-7XJW5K45IblHd_L2f5LTaDUDwvZ5L6g/edit)。
+
+需要引起注意的是，GQUIC 是较早期 Google 实施的，而 GQUIC 采用的是 Google 自己的一套加密方案。QUIC 标准化后，采用的加密方式已经换位了 TLS 1.3，因此 GQUIC 的加密方式在 IQUIC 中是完全不适用的。
+
+在 QUIC Crypto 文献中也提及：
+
+> his document is pretty old at this point. QUIC is now an IETF spec and its cryptographic handshake is now based on TLS 1.3 rather than this work. Thus this document is only of historical interest.
 
 ## 流量控制
 
