@@ -48,7 +48,7 @@
 
 Google QUIC 又称为 GQUIC（后面统称为 GQUIC），是由 Google 设计并进行实践的。
 
-由于 Google QUIC 的成功，开始了 QUIC 的标准化流程，标准化的 QUIC 被称为 IETF QUIC（IQUIC）。对于 IQUIC 的细节，在 [aioquic-transport](lib/aioquic/readme.md) 中进行了阐述。
+由于 Google QUIC 的成功，开始了 QUIC 的标准化流程，标准化的 QUIC 被称为 IETF QUIC（IQUIC）。对于 IQUIC 的细节，在 [AIOQUIC](../lib/aioquic/readme.md) 中进行了阐述。
 
 IQUIC 和 GQUIC 之间的差异是巨大的，从协议的实现角度来看，它们是完全不同的，并且是无法相互兼容的。为了让 GQUIC 逐步向 IQUIC 靠拢和兼容，新的 GQUIC 协议开始采用和 IQUIC 类似的协议结构了（请参考 [向 IETF QUIC 过渡](#向-ietf-quic-过渡)）。
 
@@ -60,6 +60,10 @@ GQUIC 的特点：
 - Authenticated and encrypted header and payload
 - Stream and connection flow control
 - Connection migration
+
+本文主要参考 [QUIC Wire Layout Specification](https://docs.google.com/document/d/1WJvyZflAO2pq77yOLbp9NsGjC1CHetAXV8I0fQe-B_U/edit#) 而进行的总结，该文档的版本范围适用于 Q043 及其以下版本。
+
+对于 Q043 以上的版本，在 Google QUIC 官方文档中并没有详细文档，我猜想这是由于 IQUIC 开始逐步替代 GQUIC 所致。
 
 ## 连接与流
 
@@ -644,7 +648,7 @@ QUIC_SEQUENCE_NUMBER_LIMIT_REACHED | Transmitting an additional packet would cau
 
 ## 向 IETF QUIC 过渡
 
-对于 IQUIC 的细节，已经在 [AIOQUIC](lib/aioquic/readme.md) 中进行了描述。
+对于 IQUIC 的细节，已经在 [AIOQUIC](../lib/aioquic/readme.md) 中进行了描述。
 
 ## 附录、参考文献
 
