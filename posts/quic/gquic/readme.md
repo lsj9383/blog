@@ -7,8 +7,10 @@
     - [连接与流](#连接与流)
         - [版本协商](#版本协商)
         - [建立连接](#建立连接)
-        - [传输参数](#传输参数)
         - [断开连接](#断开连接)
+            - [正常关闭](#正常关闭)
+            - [超时关闭](#超时关闭)
+            - [异常关闭](#异常关闭)
         - [创建流](#创建流)
         - [断开流](#断开流)
     - [流量控制](#流量控制)
@@ -18,7 +20,11 @@
         - [Connection 流控更新策略](#connection-流控更新策略)
         - [RST 考虑](#rst-考虑)
         - [与 TCP 流控的差异](#与-tcp-流控的差异)
-    - [拥塞控制](#拥塞控制)
+    - [丢失恢复和拥塞控制](#丢失恢复和拥塞控制)
+        - [与 TCP 的差异](#与-tcp-的差异)
+        - [GQUIC Loss Recovery](#gquic-loss-recovery)
+        - [GQUIC 拥塞控制](#gquic-拥塞控制)
+        - [GUIQC RTO](#guiqc-rto)
     - [协议结构](#协议结构)
         - [Packet](#packet)
             - [Version Negotiation Packet](#version-negotiation-packet)
@@ -36,7 +42,7 @@
             - [PING Frame](#ping-frame)
             - [CONNECTION_CLOSE Frame](#connection_close-frame)
             - [GOAWAY Frame](#goaway-frame)
-        - [传输参数](#传输参数-1)
+        - [传输参数](#传输参数)
         - [Error Code](#error-code)
     - [Middlebox 解析 GQUIC](#middlebox-解析-gquic)
     - [向 IETF QUIC 过渡](#向-ietf-quic-过渡)
@@ -67,15 +73,110 @@ GQUIC 的特点：
 
 ## 连接与流
 
+GQUIC 不同于传统 TCP 通过五元组对连接（Connection）进行标识，而是通过一个随机的 Connection ID 进行标识。
+
+本质上，当连接 ID 两端达成一致，即可认为连接建立。对于应用层而言，连接建立（通信双发达成一致的 Connection ID）并不代表连接可用，而是需要版本、加密、传输等参数也达成一致，这一过程通过握手来完成。
+
+在 GQUIC 中，一个 Connection 可以创建非常多的流（Stream），每个 Stream 之间是独立的，且可以安全的发送数据，某个流丢包导致阻塞并不会影响 Connection 上其他 Stream 的使用。
+
 ### 版本协商
+
+QUIC 的版本是非常多的，即便是 GQUIC 目前版本也超过了 50，客户端和服务器之间进行 QUIC 通信，首先第一步就是需要确认版本。
+
+GQUIC 中存在一种 Special Packet，客户端通过 Special Packet 告诉服务器希望使用的版本，而服务器接受则可以继续通信，否则会返回类似的 Special Packet，并带上服务器支持的版本号，客户端收到后需要选择服务器支持的版本号重发 QUIC Packet。
+
+```txt
+     Endpoint                                 Peer
+
+Packet(version_flag ON,
+       version=G040)   --------->
+                       <---------      Version Negotiation(version_flag ON,
+                                                           versions=G043 G046 G050)
+
+Packet(version_flag ON,
+       version=G043)   --------->
+                       <---------      Packet(version_flag OFF)
+```
 
 ### 建立连接
 
-### 传输参数
-
 ### 断开连接
 
+连接一旦建立，有三种断开连接的方式：
+
+- 正常关闭，通过发送 CONNECTION_CLOSE Frame。
+- 超时关闭，GQUIC 连接空闲时间过长会触发超时关闭。
+- 异常关闭，通过 PACKET 的 REST Flag 可以将连接进行异常终止。这个关闭方式类似于 TCP RST。
+
+#### 正常关闭
+
+通过发送 CONNECTION_CLOSE Frame 进行关闭，并且所有的 Stream 将会被关闭。
+
+```txt
+     Endpoint                        Peer
+
+Packet   --------->
+                       <---------   Packet
+Packet   --------->
+                       <---------   Packet
+
+                       <---------   Packet(CONNECTION_CLOSE)
+```
+
+这看起来是没有问题的，但是其实最佳的做法是在发送 CONNECTION_CLOSE 前，应该显示的关闭所有的 Stream：
+
+```txt
+     Endpoint                                              Peer
+
+Packet(STREAM<s=3>)   --------->
+                                        <---------   Packet(STREAM<s=3>)
+                                        <---------   Packet(STREAM<s=2>)
+
+                                        <---------   Packet(STREAM<s=3, FIN>)
+                                        <---------   Packet(STREAM<s=2, FIN>)
+Packet(STREAM<s=3, FIN>)   --------->
+Packet(STREAM<s=2, FIN>)   --------->
+                                        <---------   Packet(CONNECTION_CLOSE)
+```
+
+如果收到 CLOSE_CONNECTION 时，还存在者活跃的 Stream，则 CLOSE_CONNECTION 的接收方应该认为这是一个异常的关闭。
+
+#### 超时关闭
+
+GQUIC 连接默认空闲超时为 30s，该超时时间为连接协商中的必需参数 `ICSL`，且最多设置为 10min。
+
+GQUIC 在连接超时关闭时可以有两种选择：
+
+- 可以发送 CONNECTION_CLOSE Frame 给对方告知连接关闭。
+- 不发送 CONNECTION_CLOSE Frame，进行静默关闭。这种关闭策略主要是为了避免移动端无线电网络的唤醒，节约用电。
+
+
+```txt
+     Endpoint                              Peer
+
+       Packet   --------->
+                             <---------   Packet
+       Packet   --------->
+                             <---------   Packet
+
+==================================== Time out ====================================
+
+                             <---------   optional Packet(CONNECTION_CLOSE)
+```
+
+#### 异常关闭
+
+通过 REST Packet 可以立即终止一个 Connection，这可能是由于某些错误的状态或者错误的协议所致。REST Packet 和 TCP 中的 RST 关闭很类似。
+
+为了避免被恶意第三方通过构造 REST Packet 关闭连接，需要对 REST Packet 进行认证。
+
 ### 创建流
+
+Stream 的创建是非常简单的，只需要使用某个 Stream ID 发送数据，则接收方在收到后默认创建该 Stream。
+
+Stream 的 Stream ID 是有讲究的，为了避免两端同时创建流，并使用了相同的 Stream ID，导致 Stream ID 冲突。客户端创建的 Stream ID 必须为奇数，服务器创建的 Stream ID 必须为偶数。
+
+如果接收到 Stream 一端不希望接收该 Stream，可以立即发送 RST_STREMA Frame。不接受 Stream 的原因可能是因为发送过 GOAWAY Frame 所致。
 
 ### 断开流
 
@@ -102,7 +203,7 @@ GQUIC 的流控有两个层面：
 ```txt
      Endpoint                                 Peer
 
-Initial(SFCW=10,CFCW=20)   --------->
+HKS(SFCW=10,CFCW=20)       --------->
                            <---------      STREAM(len=3)
                            <---------      STREAM(len=7)
                            <---------      BLOCKED
@@ -201,7 +302,85 @@ TCP 和 GQUIC 的流控的目的其实都是一样的：
   - 发送的是接收数据的总大小，本质上就是 已消费数据 + 接收缓冲区大小。
   - Endpint 并不会每个 Segment 中带上接收缓冲区大小，而是在需要变更的时候才会带上接收缓冲区大小。
 
-## 拥塞控制
+## 丢失恢复和拥塞控制
+
+该节主要参考了 [QUIC Loss Recovery And Congestion Control](https://tools.ietf.org/id/draft-tsvwg-quic-loss-recovery-00.html)。
+
+GQUIC 的所有传输均依赖于 Packet，而 Packet 均包含了一个序列号：Packet Number（Special Packet 除外），这些 Packet Number 在 Connection 的生命周期中是不会重复的，并且单调递增，因此当 Packet 丢失导致 Packet 重传时会启用新的 Packet Number。
+
+GQUIC 中的 Packet 和 Frame 有以下的机制（这对于丢失恢复和拥塞控制较为重要）：
+
+- STREAM Frame 包含了应用数据。加密握手数据同样是作为 STREAM Frame 进行发送的。
+- ACK Frame 帧包含对 Packet 的确认信息。GQUIC 基于 NACK 机制，这让 GQUIC 会通过 ACK 告知收到的最大包含，即 Largest Acked Number。小于 Largest Acked Number 但是未收到的 Packet，会将 Packet Number 放到 NACK Ranges 中。
+
+**注解：**
+
+- NACK 指的是 Negative ACK，是一种负向反馈。在接收方把所有未收到的包序号通过反馈报文通知到发送方进行重传。
+
+### 与 TCP 的差异
+
+- GQUIC 单调增加序列号
+- GQUIC 没有 SACK 取消
+- GQUIC 具有更多 NACK 范围
+- GQUIC 具有显式更正延迟
+
+**注解：**
+
+- SACK 指的是 Selective ACK。在 TCP 中，开启 SACK 选项后，receiver 会将自己收到了哪些包，没收到哪些包的信息记录在 sack 段中告诉给 sender，这样 sender 便可以一次性重传所有的丢包。
+
+### GQUIC Loss Recovery
+
+在发送数据时，可以根据以下策略设置重传计时器：
+
+- 如果握手尚未完成，启动握手计时器，计时器将 1.5 倍 SRTT作为超时时间，并具有指数补偿。
+- 如果存在未完成 Packet 被 NACK 过，设置丢失定时器。通常为 0.25 RTT。
+- 如果有小于两个 TLPs 被发送，开启 TLP 定时器。
+- 如果已经发送了两个 TLPs，则开启 RTO 定时器，且超时时间为：`max(200ms, SRTT + 4*RTTVAR)`
+
+**注意：**
+
+- TLP tail loss probes，即拖尾丢失检测，可以参考 [TCP Tail Loss Probe(TLP)](http://perthcharles.github.io/2015/10/31/wiki-network-tcp-tlp/)。
+
+
+在接收到 ACK 时，进行以下动作：
+
+1. 验证 ACK，包括忽略乱序 ACK。
+1. 根据 ACK 的 Delay 时间，更新 RTT 测量。
+1. 对所有的小于等于 Largest Acked Number，且未在 NACK Range 中的 Packet 为 ACKED 状态。
+1. 对所有小于 Largest Acked Number，且在 NACK Range 中的 Packet，其 missing_reports 递增（missing_reports 这是跟随每个 Packet 的变量，表示对于一个 Packet，收到 ACK 时，且处于 NACK Range 中的次数）。
+1. Packet 中 missing_reports > Threshold 的 Packet 被标记为重传（Threshold 默认为 3）。
+1. 如果存在 NACK Range，并且 Largest Acked Number 就是发送的最大 Packet，则重传定时器设置为 0.25 RTT，这能促使快速进行重传。
+1. 如果完成了所有 Packet，则停止定时器。
+
+设置定时器的时候会给予其状态，在定时器超时后，不同的状态会导致不同的超时动作：
+
+- Handshake state，重传所有握手的 Packet。
+- Loss timer state:
+  - 丢失处于 NACK Range 中的 Packet。
+  - 向拥塞控制器进行报告，以更新拥塞窗口。
+  - 尽可能多的重传拥塞控制允许范围内的 Packet。
+- TLP state:
+  - 重传最小的可重传（标记为重传的）Packet。
+  - 在 ACK 到达前，不允许将任何 Packet 标记为丢失。
+  - 重新启动 TLP 或者 RTO 定时器。
+- RTO state:
+  - 重传两个最小的可重传（标记为重传的）Packet。
+  - 重新启动 RTO 定时器。
+
+> QUIC implements the algorithm for early loss recovery described in the FACK paper (and implemented in the Linux kernel.) QUIC uses the packet sequence number to measure the FACK reordering threshold. Currently QUIC does not implement an adaptive threshold as many TCP implementations(ie: the Linux kernel) do.
+
+### GQUIC 拥塞控制
+
+GQUIC 的拥塞控制是可插拔的，默认的拥塞控制是类似于 TCP NewReno 的方案。
+
+> QUIC only reduces its CWND once per congestion window, in keeping with the NewReno RFC. It tracks the largest outstanding packet at the time the loss is declared and any losses which occur before that packet number are considered part of the same loss event. It’s worth noting that some TCP implementations may do this on a sequence number basis, and hence consider multiple losses of the same packet a single loss event.
+
+### GUIQC RTO
+
+GQUIC 的 RTO 计算机制类似于 TCP。
+
+> QUIC calculates SRTT and RTTVAR according to the standard formulas. An RTT sample is only taken if the delayed ack correction is smaller than the measured RTT (otherwise a negative RTT would result), and the ack’s contains a new, larger largest observed packet number. min_rtt is only based on the observed RTT, but SRTT uses the delayed ack correction delta.
+
 
 ## 协议结构
 
@@ -654,9 +833,11 @@ QUIC_SEQUENCE_NUMBER_LIMIT_REACHED | Transmitting an additional packet would cau
 
 1. [QUIC, a multiplexed stream transport over UDP](https://www.chromium.org/quic)
 1. [QUIC Wire Layout Specification](https://docs.google.com/document/d/1WJvyZflAO2pq77yOLbp9NsGjC1CHetAXV8I0fQe-B_U/edit?usp=sharing)
+1. [draft-tsvwg-quic-protocol-02](https://tools.ietf.org/html/draft-tsvwg-quic-protocol-02)
 1. [Use IETF Packet Header Wire Format in Google QUIC](https://docs.google.com/document/d/1FcpCJGTDEMblAs-Bm5TYuqhHyUqeWpqrItw2vkMFsdY/edit#)
 1. [Flow control in QUIC](https://docs.google.com/document/d/1F2YfdDXKpy20WVKJueEf4abn_LVZHhMUMS5gX6Pgjl4/edit#)
 1. [QUIC Loss Recovery And Congestion Control](https://tools.ietf.org/id/draft-tsvwg-quic-loss-recovery-00.html)
 1. [Congestion Control and Loss Recovery](https://docs.google.com/presentation/d/1T9GtMz1CvPpZtmF8g-W7j9XHZBOCp9cu1fW0sMsmpoo/edit#slide=id.gb7cc33ba7_25_74)
 1. [QUIC Crypto](https://docs.google.com/document/d/1g5nIXAIkN_Y-7XJW5K45IblHd_L2f5LTaDUDwvZ5L6g/edit)
 1. [Parsing QUIC Client Hellos](https://docs.google.com/document/d/1GV2j-PGl7YGFqmWbYvzu7-UNVIpFdbprtmN9tt6USG8/preview#)
+1. [TCP Tail Loss Probe(TLP)](http://perthcharles.github.io/2015/10/31/wiki-network-tcp-tlp/)
