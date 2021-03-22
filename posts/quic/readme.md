@@ -1,7 +1,8 @@
 # Introduction
 
 - [Google QUIC](gquic/readme.md)
-- [IETF QUIC](iquic.md)
+- IETF QUIC
 - [构建](build/readme.md)
 - [库](lib/readme.md)
   - [aioquic](lib/aiqouic/readme.md)
+- [Game QUIC 探索之路](game-quic-explore/readme.md)
