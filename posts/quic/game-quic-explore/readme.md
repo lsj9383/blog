@@ -5,7 +5,8 @@
 - [Game QUIC 探索之路](#game-quic-探索之路)
     - [概述](#概述)
     - [现状](#现状)
-        - [QUIC 标准化进程](#quic-标准化进程)
+        - [主流的游戏网络协议](#主流的游戏网络协议)
+        - [QUIC 的标准化](#quic-的标准化)
         - [游戏引擎对 QUIC 的支持](#游戏引擎对-quic-的支持)
         - [QUIC Lib](#quic-lib)
         - [QUIC 闭源生态](#quic-闭源生态)
@@ -16,17 +17,34 @@
 
 ## 概述
 
-IETF QUIC（下称 IQUIC）
+游戏中使用何种网络协议可以得到最小的延时和阻塞，提升用户的体验，这是值得我们思考的。
 
-Google QUIC（下称 GQUIC）
+QUIC 作为新兴的网络协议存在无限的可能，本文目的在于探究 QUIC 是否适合于应用于游戏。
+
+QUIC 存在两个分支：
+
+- Google QUIC（下称 GQUIC），由 Google 设计实现，是 IQUIC 的原型。
+- IETF QUIC（下称 IQUIC），Google QUIC 的成功推动了 QUIC 的标准化进程，发展除了 IETF QUIC。
+
+**注意：**
+
+- IQUIC 和 GQUIC 从协议细节上来讲差别巨大，完全是两个协议。
 
 ## 现状
 
-### QUIC 标准化进程
+### 主流的游戏网络协议
+
+### QUIC 的标准化
+
+> QUIC (pronounced "quick") is a general-purpose transport layer network protocol initially designed by Jim Roskind at Google, implemented, and deployed in 2012, announced publicly in 2013 as experimentation broadened, and described to the IETF.
+
+最早有 Google 开始进行 QUIC 的设计和实现，Google 实现的 QUIC 版本已到了 Q50。从 Chromium 源码上看，早期的 Google QUIC 已经废弃，无法使用。
+
+IETF QUIC 的草案开始于 2016 年，如今仍未结束，从 2016 年的 Draft 00，如今已经到了 Draft 34。
 
 ### 游戏引擎对 QUIC 的支持
 
-受限于 QUIC 协议本身仍未标准化，各个游戏引擎并未对 QUIC 做任何支持。
+受限于 QUIC 协议本身标准化仍未完成，主流游戏引擎也并未对 QUIC 做任何支持。
 
 这是一些相关的讨论：
 
@@ -53,7 +71,7 @@ Google QUIC（下称 GQUIC）
 
 总结：
 
-- QUIC 协议尚未完成标准化，游戏引擎并不支持 QUIC。
+- QUIC 协议的标准化尚未完成，游戏引擎并不支持 QUIC。
 - 游戏领域对 QUIC 普遍不太看好，因为 QUIC 是基于流且可靠的协议，而大部分网络游戏不太依赖于协议层提供可靠性。
 
 ### QUIC Lib
@@ -100,28 +118,32 @@ Lib | Language | Supported IQUIC Versions | Supported GQUIC Versions | Supported
 TEG 提供了 QUIC 接入方案：
 
 - Server，提供 STGW 作为 QUIC 的入口和代理并通过 TCP 连接到 RS，简化 RS 开发的复杂度。
-- Client，提供 `t****c` 作为开发的 SDK。
-
-WXG 也提供了自己的 QUIC SDK：`a****a`。
+- Client，提供 `t****c` 作为开发的 SDK（同时 WXG 也提供了自己的 QUIC SDK：`a****a`）。
 
 STGW 支持的 QUIC 协议有：
 
 - Q43,46,50
 - I27,29,31
 
-关系图：
+STGW QUIC 方案架构图：
 
-优势：
+![](assets/quic-structure.png)
 
-- 避免重复造轮子。
-- 减少服务器运维成本。
-- `t****c` 支持明文模式。
+- 第一层 TGW 仅负责解析 QUIC 包中的连接 ID，并根据连接 ID 将请求转发给 STGW 集群节点。转发规则为根据连接 ID 的 Hash 值。
+- 第二层 STGW 节点实际的解析 QUIC 包中的数据，并建立到 RS 的连接。
+- 第三层 RS 集群为业务提供，业务只需要使用简单的 TCP Server 即可处理客户端过来的 QUIC 包。
 
-劣势：
+总结：
 
-- `t****c` 对 IQUIC 的支持非常差，名义上是支持的，但是实际上建立连接会失败，这是由于 `t****c` 依赖了不兼容版本的 Chromium 所致。
-- STGW 依赖了 `t****c` 进行实现，所以其对 IQUIC 的支持较差，但是其却实际上可以进行连接和通信。
-- STGW 只能对 Q043 支持连接迁移。
+- 生态优势：
+  - 避免重复造轮子。
+  - 减少服务器运维成本，方便进行扩缩容。
+  - `t****c` 支持明文模式。
+  - `t****c` 天生支持 QUIC 降级，即 QUIC 通信失败会自动降级为 TCP。
+- 生态劣势：
+  - `t****c` 对 IQUIC 的支持非常差，名义上是支持的，但是实际上建立连接会失败，这是由于 `t****c` 依赖了不兼容版本的 Chromium 所致。
+  - STGW 依赖了 `t****c` 进行实现，所以其对 IQUIC 的支持较差，但是其却实际上可以进行连接和通信。
+  - STGW 只能对 Q043 支持连接迁移。
 
 **注意：**
 
