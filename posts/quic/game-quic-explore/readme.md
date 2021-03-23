@@ -1,4 +1,4 @@
-# Game QUIC 探索之路
+# Game QUIC Explore
 
 <!-- TOC -->
 
