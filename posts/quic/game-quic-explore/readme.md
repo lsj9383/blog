@@ -28,7 +28,7 @@ QUIC 存在两个分支：
 
 **注意：**
 
-- IQUIC 和 GQUIC 从协议细节上来讲差别巨大，完全是两个协议。
+- IQUIC 和 GQUIC 
 
 ## 现状
 
@@ -169,3 +169,4 @@ STGW QUIC 方案架构图：
 1. [wiki-quic](https://en.wikipedia.org/wiki/QUIC)
 1. [IETF QUIC WG Base Draft](https://github.com/quicwg/base-drafts/wiki/Implementations)
 1. [UDP for games – security (encryption and DDoS protection)](http://ithare.com/udp-for-games-security-encryption-and-ddos-protection/)
+1. [Google QUIC](https://github.com/lsj9383/blog/blob/master/posts/quic/gquic/readme.md)
