@@ -2,7 +2,7 @@
 
 <!-- TOC -->
 
-- [Game QUIC 探索之路](#game-quic-探索之路)
+- [Game QUIC Explore](#game-quic-explore)
     - [概述](#概述)
     - [现状](#现状)
         - [主流的游戏网络协议](#主流的游戏网络协议)
@@ -41,6 +41,18 @@ QUIC 存在两个分支：
 最早有 Google 开始进行 QUIC 的设计和实现，Google 实现的 QUIC 版本已到了 Q50。从 Chromium 源码上看，早期的 Google QUIC 已经废弃，无法使用。
 
 IETF QUIC 的草案开始于 2016 年，如今仍未结束，从 2016 年的 Draft 00，如今已经到了 Draft 34。
+
+GQUIC 和 IQUIC 之间的区别是巨大的，其中包括：
+
+- 对于 Connection
+  - IQUIC 仅支持单连接 ID，GQUIC 支持多个连接 ID，并且 Server 和 Client 具有自己的连接 ID。
+- 对于连接迁移
+  - GQUIC 的文档并没有描述 GQUIC 的连接迁移细节以及如何校验新 IP 的安全性。IQUIC 通过 PATH_CHALLENGE 和 PATH_RESPONSE 帧进行连接迁移。
+- 对于握手
+  - GQUIC 使用在 Stream 的基础上进行握手。在 GQUIC 中使用 stream id 为 1 的特殊 stream 进行握手相关操作。IQUIC 使用 Initial 和 Handshake Packet 进行握手。
+- 关于文档
+  - GQUIC 的文档由 Chromium 维护，并且文档并非足够完善。
+  - IQUIC 文档目前由 IETF 维护，对 QUIC 的方方面面进行了详尽的阐述。
 
 ### 游戏引擎对 QUIC 的支持
 
