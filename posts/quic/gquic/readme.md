@@ -174,7 +174,7 @@ Packet   --------->
 ```txt
      Endpoint                                              Peer
 
-Packet(STREAM<s=3>)   --------->
+Packet(STREAM<s=3>)        --------->
                                         <---------   Packet(STREAM<s=3>)
                                         <---------   Packet(STREAM<s=2>)
 
