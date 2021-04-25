@@ -1,5 +1,7 @@
 # 博客
 
+- [XRPC](posts/xrpc/readme.md)
+  - [XRPC Thread Model](posts/xrpc/xrpc-thread-model/readme.md)
 - [QUIC](posts/quic/readme.md)
   - [GQUIC](posts/quic/gquic/readme.md)
   - [AIOQUIC](posts/quic/lib/aioquic/readme.md)
