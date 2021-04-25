@@ -9,3 +9,4 @@ XRPC 会围绕以下内容进行探索和学习：
 - XRPC Future Promise
 - XRPC Server
 - XRPC Client
+- XRPC Plugins
