@@ -7,10 +7,14 @@
     - [Quick Start](#quick-start)
     - [Structure](#structure)
     - [Sequence Diagram](#sequence-diagram)
+        - [Initial Sequence Diagram](#initial-sequence-diagram)
+        - [Handle Thread Sequence Diagram](#handle-thread-sequence-diagram)
+        - [IO Thread Sequence Diagram](#io-thread-sequence-diagram)
     - [Thread Model Initial](#thread-model-initial)
         - [Server Initial](#server-initial)
         - [Client Initial](#client-initial)
     - [Task](#task)
+    - [Options](#options)
 
 <!-- /TOC -->
 
@@ -94,14 +98,66 @@ classDiagram
 
 ## Sequence Diagram
 
+### Initial Sequence Diagram
+
 ```mermaid
 sequenceDiagram
 
 participant thread_model_manager as ThreadModel Manager
 participant thread_model as ThreadModel
-participant work_thread as WorkThread
 participant work_thread_impl as WorkThreadImpl
+participant io_model as IO Model
+participant handle_model as Handle Model
+participant handle_impl as Handle Impl
+
+loop 循环创建线程模型 ThreadModel
+
+    thread_model_manager ->> thread_model_manager: 初始化线程模型 ID，设置 options.threadmodel_id
+
+    loop 根据配置的线程个数, 循环创建线程 WorkThread
+        thread_model_manager ->> thread_model_manager: 构造 WorkThread 所需要的 reactor、handle_impl 等。
+        thread_model_manager ->> work_thread_impl: 实例化 WorkThread
+        work_thread_impl -->> thread_model_manager: 返回 WorkThread 实例
+        thread_model_manager ->> thread_model_manager: 将实例放置 options.worker_threads
+    end
+
+    thread_model_manager ->> thread_model: 传递 options 以实例化 ThreadModel
+    thread_model ->> thread_model: 保存 options
+    thread_model ->> thread_model: 通过传递过来的线程池，进一步拆分用于 IO 的线程池和 Handle 的线程池并保存
+    thread_model -->> thread_model_manager: 返回 ThreadModel 实例
+end
+
+loop 循环初始化 ThreadModel
+    thread_model_manager ->> thread_model: 初始化 ThreadModel
+    loop 循环初始化 WorkThread
+        thread_model ->> work_thread_impl: 通知进行初始化
+        alt 线程属于 IO 线程
+            work_thread_impl ->> io_model: 通知初始化
+            io_model -->> work_thread_impl: 初始化完成
+        else 线程属于 Handle 线程
+            work_thread_impl ->> handle_model: 通知初始化
+            handle_model -> handle_impl: 通知初始化（其实 handle_impl 什么都不做）
+            handle_impl --> handle_model: 返回
+            handle_model -->> work_thread_impl: 初始化完成
+        end
+        work_thread_impl -->> thread_model: 初始化完成
+    end
+    thread_model -->> thread_model_manager: 初始化完成
+
+    thread_model_manager ->> thread_model: Start ThreadModel
+    loop 循环启动 WorkThread
+        thread_model ->> work_thread_impl: 启动线程
+        work_thread_impl ->> work_thread_impl: 启动线程，线程中会区分 io_model 和 handle_model 进行调用
+        work_thread_impl -->> thread_model: 启动完成
+    end
+    thread_model -->> thread_model_manager: 启动完成
+
+end
 ```
+
+### Handle Thread Sequence Diagram
+
+### IO Thread Sequence Diagram
 
 ## Thread Model Initial
 
@@ -243,4 +299,20 @@ struct Task {
 
   int dst_thread_key = -1;      // 分发 Task 到哪个线程中运行，这个是线程的索引（并非线程 ID），-1 则随机分发。
 };
+```
+
+## Options
+
+XRPC 中存在非常多的配置，这里将 Thread Model 涉及到的 Options 进行梳理。
+
+`ThreadModel::Options` 是 ThreadModel 的配置，主要是告知 ThreadModel 其模型 ID，以及线程池。
+
+```cpp
+class ThreadModel {
+ public:
+  struct Options {
+    uint16_t threadmodel_id;                                        // 当前线程模型实例的唯一id
+    std::vector<std::unique_ptr<WorkerThread>> worker_threads;      // 线程集合
+  };
+}
 ```
