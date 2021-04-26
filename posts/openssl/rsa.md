@@ -423,7 +423,8 @@ openssl 的 rsa 命令通常以 `openssl rsa` 或 `openssl genrsa` 开头。
 }
 ```
 
-[pem_to_ne.py](pem_to_ne.py) 提供了 PKCS #8 RSA Public Key PEM 转换为 RSA Base64 n 和 e 的方法。
+- [pem_to_ne.py](pem_to_ne.py) 提供了 PKCS #8 RSA Public Key PEM 转换为 RSA Base64 n 和 e 的方法。
+- [ne_to_pem.py](ne_to_pem.py) 提供了 RSA Base64 n 和 e 转换为 PKCS #8 RSA Public Key PEM 的方法。
 
 
 ## 参考文献

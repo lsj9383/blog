@@ -4,7 +4,6 @@ import base64
 
 from optparse import OptionParser
 
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
@@ -17,12 +16,19 @@ def parse_args():
     return parser.parse_args()
 
 
+def urlsafe_b64decode(data):
+    missing_padding = 4 - len(data) % 4
+    if missing_padding:
+        data += '=' * missing_padding
+    return base64.urlsafe_b64decode(data)
+
+
 def pem_from_n_e(modulus, exponent):
-    decode_n = base64.urlsafe_b64decode(modulus)
-    decode_e = base64.urlsafe_b64decode(exponent)
+    decode_n = urlsafe_b64decode(modulus)
+    decode_e = urlsafe_b64decode(exponent)
     int_n = int.from_bytes(decode_n, byteorder='big')
     int_e = int.from_bytes(decode_e, byteorder='big')
-    pub_key = rsa.RSAPublicNumbers(int_e, int_n).public_key(default_backend())
+    pub_key = rsa.RSAPublicNumbers(int_e, int_n).public_key()
     pem = pub_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
