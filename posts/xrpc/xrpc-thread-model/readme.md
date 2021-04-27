@@ -17,6 +17,8 @@
         - [Client Initial](#client-initial)
     - [Task](#task)
     - [ThreadModel](#threadmodel)
+    - [ThreadModelManager](#threadmodelmanager)
+        - [Defualt Thread Model](#defualt-thread-model)
     - [Options](#options)
         - [ThreadModel::Options](#threadmodeloptions)
         - [WorkerThreadImpl::Options](#workerthreadimploptions)
@@ -299,12 +301,68 @@ end
 
 ### Handle Thread Task Sequence Diagram
 
+这里显示 Handle Thread 处理任务以及定时器任务的时序图。
+
+为了简化时序图的复杂度，这里我省略掉了一些代理对象，心跳逻辑，仅展示核心流程。
+
 ```mermaid
 sequenceDiagram
 autonumber
 
+participant user as User
+participant thread_model as ThreadModel
+participant task_timer as Task Timer
+participant task_queue as Task Queue
+participant handle_impl as Default Handle Impl
 
+par Handle Thread 逻辑
+    handle_impl ->> handle_impl: 线程运行
+
+    loop !terminate_
+        handle_impl ->> task_timer: 获得超时任务
+        task_timer ->> task_timer: 遍历所有任务，将超时的任务都返回
+        task_timer -->> handle_impl: 返回超时任务集合
+        handle_impl ->> handle_impl: 遍历执行超时任务
+
+        handle_impl ->> task_queue: 获取 Task
+        task_queue -->> handle_impl: 返回 Task
+        handle_impl ->> handle_impl: 遍历执行任务
+    end
+and User 逻辑
+    user ->> user: 从 ThreadModelManager 中获得需要的 ThreadModel
+
+    user ->> user: 构造任务 Task，包括 Task 的 handler、指定运行 task 的线程等
+    user ->> thread_model: SubmitHandleTask
+    thread_model ->> thread_model: 判断 task.group_id 是否属于当前 ThreadModel 的 ID
+    thread_model ->> thread_model: 通过 task.dst_thread_key 选择运行 Task 的线程队列，队列和 Worker 是绑定的
+    alt 若运行 Task 的线程为 User 所处线程
+        thread_model ->> thread_model: 直接调用 task.handler
+    else 若运行 Task 的线程不为 User 线程
+        thread_model ->> task_queue: 向指定线程的队列分发 task
+        task_queue -->> thread_model: 分发完成
+    end
+    thread_model -->> user: 提交任务完成
+
+    user ->> user: 构造 Timer Task
+    user ->> thread_model: SubmitTimerTask
+    alt User 线程不属于 ThreadModel
+        thread_model ->> thread_model: 进程放弃处理, core
+    end
+    thread_model ->> task_timer: CreateTimer 创建定时器任务
+    task_timer -->> thread_model: 定时器任务创建完成
+    thread_model -->> user: 提交定时任务完成
+end
 ```
+
+User 通过和 ThreadModel 交互可以将 Task 交给 Handle Impl，那 User 如何获取 ThreadModel 呢？使用 `GetThreadModel` 或 `GetDefaultThreadModel` 即可：
+
+```cpp
+auto thread_model = ThreadModelManager::GetInstance()->GetThreadModel("default", "default_instance");
+// 等价于
+auto thread_model = ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+```
+
+细节请参考 [ThreadModelManager](#threadmodelmanager)。
 
 ### IO Thread Task Sequence Diagram
 
@@ -466,6 +524,10 @@ struct Task {
 ```
 
 ## ThreadModel
+
+## ThreadModelManager
+
+### Defualt Thread Model
 
 ## Options
 
