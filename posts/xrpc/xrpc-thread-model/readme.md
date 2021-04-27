@@ -8,12 +8,15 @@
     - [Structure](#structure)
     - [Sequence Diagram](#sequence-diagram)
         - [Initial Sequence Diagram](#initial-sequence-diagram)
-        - [Handle Thread Sequence Diagram](#handle-thread-sequence-diagram)
-        - [IO Thread Sequence Diagram](#io-thread-sequence-diagram)
+        - [Handle Thread Run Sequence Diagram](#handle-thread-run-sequence-diagram)
+        - [IO Thread Run Sequence Diagram](#io-thread-run-sequence-diagram)
+        - [Handle Thread Task Sequence Diagram](#handle-thread-task-sequence-diagram)
+        - [IO Thread Task Sequence Diagram](#io-thread-task-sequence-diagram)
     - [Thread Model Initial](#thread-model-initial)
         - [Server Initial](#server-initial)
         - [Client Initial](#client-initial)
     - [Task](#task)
+    - [ThreadModel](#threadmodel)
     - [Options](#options)
         - [ThreadModel::Options](#threadmodeloptions)
         - [WorkerThreadImpl::Options](#workerthreadimploptions)
@@ -185,7 +188,7 @@ void WorkerThreadImpl::Run() {
 }
 ```
 
-### Handle Thread Sequence Diagram
+### Handle Thread Run Sequence Diagram
 
 Handle 线程是 Seperate 模式的工作线程，主要是：
 
@@ -210,10 +213,7 @@ work_thread_impl ->> work_thread_impl: 绑核
 
 work_thread_impl ->> work_thread_impl: 设置线程名字
 
-alt 属于 IO 线程
-work_thread_impl ->> io_model: Run
-io_model -->> work_thread_impl: 线程退出
-else 属于 Handle 线程
+alt 属于 Handle 线程
 work_thread_impl ->> handle_model: Run
 
 alt 开启了 RPC 心跳上报
@@ -244,7 +244,9 @@ handle_model -->> work_thread_impl: 线程退出
 end
 ```
 
-### IO Thread Sequence Diagram
+### IO Thread Run Sequence Diagram
+
+IO 线程存在于 Seperate 和 Merge 两种工作模式中，其运行时序图如下所示：
 
 ```mermaid
 sequenceDiagram
@@ -252,8 +254,9 @@ autonumber
 
 participant work_thread_impl as WorkThreadImpl
 participant io_model as IO Model
-participant handle_model as Handle Model
-participant handle_impl as Default Handle Impl
+participant io_model_impl as IO Model Impl
+participant reactor as Reactor
+participant poller as Epoll Poller
 participant task_queue as Task Queue
 
 work_thread_impl ->> work_thread_impl: 线程启动
@@ -265,14 +268,59 @@ work_thread_impl ->> work_thread_impl: 绑核
 work_thread_impl ->> work_thread_impl: 设置线程名字
 
 alt 属于 IO 线程
-work_thread_impl ->> io_model: Run
-io_model -->> work_thread_impl: 线程退出
-else 属于 Handle 线程
-work_thread_impl ->> handle_model: Run
-handle_model ->> handle_impl: Run
-handle_impl -->> handle_model: 线程退出
-handle_model -->> work_thread_impl: 线程退出
+    work_thread_impl ->> io_model: Run
+    io_model ->> io_model_impl: Run
+
+    alt 开启了 RPC 心跳上报
+        io_model_impl ->> io_model_impl: 心跳上报配置初始化
+    end
+    io_model_impl ->> reactor: Run
+
+    loop !terminate_
+        reactor ->> poller: Dispatch(timeout=5ms)
+        poller ->> poller: 使用 epoll wait 等待事件（网络事件、定时器事件）
+        poller ->> poller: 处理所有事件
+        poller -->> reactor: 处理完成
+
+        reactor ->> task_queue: 获取任务队列
+        task_queue -->> reactor: 返回任务队列
+        reactor ->> reactor: 遍历所有任务执行
+    end
+
+    reactor ->> task_queue: 获取任务队列
+    task_queue -->> reactor: 返回任务队列
+    reactor ->> reactor: 遍历所有任务执行
+
+    reactor -->> io_model_impl: 线程退出
+    io_model_impl -->> io_model: 线程退出
+    io_model -->> work_thread_impl: 线程退出
 end
+```
+
+### Handle Thread Task Sequence Diagram
+
+```mermaid
+sequenceDiagram
+autonumber
+
+
+```
+
+### IO Thread Task Sequence Diagram
+
+IO 线程处理方式和 Handle 处理方式的差别是巨大的，原因是：
+
+- IO Thread 除了处理普通 Task 外，还需要处理网络相关的任务
+- IO Thread 需要处理网络事件
+- IO Thread 的 Timer Task 使用 Epoll + Timer FD 的方式实现（Handle Thread 的 Timer Task 使用定期检查的方式实现）
+
+对于 IO 线程的网络事件处理更详细的内容，请参考 [Network Model](../xrpc-network-model/readme.md)。
+
+```mermaid
+sequenceDiagram
+autonumber
+
+
 ```
 
 ## Thread Model Initial
@@ -416,6 +464,8 @@ struct Task {
   int dst_thread_key = -1;      // 分发 Task 到哪个线程中运行，这个是线程的索引（并非线程 ID），-1 则随机分发。
 };
 ```
+
+## ThreadModel
 
 ## Options
 
