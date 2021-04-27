@@ -38,6 +38,11 @@ XRPC 框架支持的线程模型是很多的，但是由于种种原因，这里
 - fiber，协程模型，本文不会提及。
 - spp，另一种协程模型，本文不会提及。
 
+defualt 线程模型又分为两种处理方式：
+
+- seperate，IO 线程和 Handle 线程分离，IO 线程处理网络事件，Handle 线程处理具体的业务。
+- merge，IO 线程和 Handle 线程合并，每个线程都能处理网络事件和业务的线程。
+
 ## Quick Start
 
 Default 线程模型本质上就是一个线程池，通过一个提交 Task 至线程模型的 Demo，可以直观的了解到 XRPC 线程池交互方式。
@@ -59,12 +64,13 @@ global:
 
 ```c++
 // 通过线程模型的类型和名称获得线程模型
-std::string threadmodel_type = "default";                       // default 是默认线程模型
-std::string threadmodel_instance_name = "default_instance";     // default_instance 是线程模型的名字，线程模型的名字在 yaml 文件的 global 中定义
-auto thread_model = ThreadModelManager::GetInstance()->GetThreadModel("default", "default_instance");
+// std::string threadmodel_type = "default";                       // default 是默认线程模型
+// std::string threadmodel_instance_name = "default_instance";     // default_instance 是线程模型的名字，线程模型的名字在 yaml 文件的 global 中定义
+// auto thread_model = ThreadModelManager::GetInstance()->GetThreadModel("default", "default_instance");
+auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
 
 // 构建一个任务
-Task* task = new Task();
+xrpc::Task* task = new xrpc::Task();
 task->group_id = thread_model->GetThreadModelId();      // 线程模型 ID
 task->task_type = TaskType::TRANSPORT_REQUEST;          // 任务的类型
 task->dst_thread_key = -1;                              // 随机选择一个 Worker 执行 Task
@@ -72,7 +78,37 @@ task->handler = [](Task* task) mutable {
     std::cout << "hello world" << std::endl;
 };
 
-TaskResult result = thread_model->SubmitHandleTask(task);
+xrpc::TaskResult result = thread_model->SubmitHandleTask(task);
+```
+
+提交一个 Period Timer Task 到线程模型中运行：
+
+```c++
+auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+xrpc::Task* task = new xrpc::Task;
+task->group_id = thread_model->GetThreadModelId();
+task->task_type = xrpc::TaskType::TRANSPORT_REQUEST;
+task->handler = [=](xrpc::Task* task) {
+    xrpc::TimerTaskInfo* timer_task_info = new xrpc::TimerTaskInfo();
+    timer_task_info->cancel = false;
+    timer_task_info->expiration = xrpc::TimeProvider::GetNowMs() + 1000;
+    timer_task_info->interval = 5000;     // ms
+    timer_task_info->executor = [=]() {
+        auto tid = std::this_thread::get_id();
+        std::cout << "tid:" << tid << std::endl;
+    };
+
+    xrpc::Task* timer_task = new xrpc::Task;
+    timer_task->group_id = thread_model->GetThreadModelId();
+    timer_task->task_type = xrpc::TaskType::TIMER;
+    timer_task->task = reinterpret_cast<void*>(timer_task_info);
+    timer_task->handler = nullptr;
+    thread_model->SubmitTimerTask(timer_task);
+};
+
+// 用 Thread Model Task 包装 Timer Task
+// 这是因为 xrpc 框架要求提交 Timer Task 的线程必须属于 XRPC Thread Model 的线程
+thread_model->SubmitHandleTask(task);
 ```
 
 ## Structure
