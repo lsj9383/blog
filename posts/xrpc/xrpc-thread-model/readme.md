@@ -381,7 +381,7 @@ and User 逻辑
 
     user ->> user: 构造 Timer Task
     user ->> thread_model: SubmitTimerTask
-    alt User 线程不属于 ThreadModel
+    alt User 线程不属于 Handle 线程
         thread_model ->> thread_model: 进程放弃处理, core
     end
     thread_model ->> task_timer: CreateTimer 创建定时器任务
@@ -414,7 +414,66 @@ IO 线程处理方式和 Handle 处理方式的差别是巨大的，原因是：
 sequenceDiagram
 autonumber
 
+participant user as User
+participant thread_model as ThreadModel
+participant task_queue as Task Queue
+participant io_model_impl as Default IO Model Impl
+participant reactor as Reactor
+participant poller as Epoll Poller
 
+par IO Thread 逻辑
+    io_model_impl ->> io_model_impl: 线程运行
+    io_model_impl ->> reactor: Run
+
+    loop !terminate_
+        reactor ->> poller: Dispatch(timeout=5ms)
+        poller ->> poller: epoll wait（IO、Timer）
+        poller ->> poller: 处理所有的 IO 事件和定时器事件
+        poller -->> reactor: 处理完成
+
+        reactor ->> task_queue: 获取 Task
+        task_queue -->> reactor: 返回 Task
+        reactor ->> reactor: 遍历执行任务
+    end
+    reactor -->> io_model_impl: Finish
+
+and User 逻辑
+    user ->> user: 从 ThreadModelManager 中获得需要的 ThreadModel
+
+    user ->> user: 构造任务 Task，包括 Task 的 handler、指定运行 task 的线程等
+    user ->> thread_model: SubmitIoTask
+    thread_model ->> thread_model: 判断 task.group_id 是否属于当前 ThreadModel 的 ID
+    thread_model ->> thread_model: 通过 task.dst_thread_key 选择运行 Task 的线程队列，队列和 Worker 是绑定的
+    alt 若运行 Task 的线程为 User 所处线程并且 User 为 IO 线程
+        thread_model ->> thread_model: 直接调用 task.handler
+    else 若运行 Task 的线程不为 User 线程或者 User 不为 IO 线程
+        thread_model ->> task_queue: 向指定线程的队列分发 task
+        task_queue -->> thread_model: 分发完成
+    end
+    thread_model -->> user: 提交任务完成
+
+    user ->> user: 构造 Timer Task
+    user ->> thread_model: SubmitTimerTask
+
+    alt User 线程不属于 IO Thread
+        thread_model ->> thread_model: 进程放弃处理, core
+    end
+
+    thread_model ->> thread_model: 选择当前 User 线程的 IO Model（前面的 if 条件已经确保当前 User 线程为 IO Thread）
+
+    thread_model ->> io_model_impl: SubmitTask
+
+    alt User 线程不为 IO Model 的线程
+        io_model_impl ->> thread_model: 返回提交失败
+    end
+
+    io_model_impl ->> reactor: AddTimerAt
+    reactor ->> reactor: 更新定时器 fd 超时时间
+    reactor -->> io_model_impl: AddTimerAt Finish
+
+    io_model_impl -->> thread_model: 定时器任务创建完成
+    thread_model -->> user: 提交定时任务完成
+end
 ```
 
 ## Thread Model Initial
