@@ -15,6 +15,9 @@
         - [Client Initial](#client-initial)
     - [Task](#task)
     - [Options](#options)
+        - [ThreadModel::Options](#threadmodeloptions)
+        - [WorkerThreadImpl::Options](#workerthreadimploptions)
+        - [DefaultIoModelImpl::Options](#defaultiomodelimploptions)
 
 <!-- /TOC -->
 
@@ -100,25 +103,35 @@ classDiagram
 
 ### Initial Sequence Diagram
 
+这里展示了 ThreadModelManager 如何对 ThreadModel 及相关对象初始化的流程：
+
 ```mermaid
 sequenceDiagram
+autonumber
 
 participant thread_model_manager as ThreadModel Manager
 participant thread_model as ThreadModel
 participant work_thread_impl as WorkThreadImpl
 participant io_model as IO Model
 participant handle_model as Handle Model
-participant handle_impl as Handle Impl
 
 loop 循环创建线程模型 ThreadModel
 
     thread_model_manager ->> thread_model_manager: 初始化线程模型 ID，设置 options.threadmodel_id
 
     loop 根据配置的线程个数, 循环创建线程 WorkThread
-        thread_model_manager ->> thread_model_manager: 构造 WorkThread 所需要的 reactor、handle_impl 等。
+        alt IO 线程
+            thread_model_manager ->> thread_model_manager: 构造 IO Model Impl
+            thread_model_manager ->> thread_model_manager: 构造 IO Model
+        else Handle 线程
+            thread_model_manager ->> thread_model_manager: 构造 Handle Model Impl
+            thread_model_manager ->> thread_model_manager: 构造 Handle Model
+        end
+        thread_model_manager ->> thread_model_manager: 构造 Task Queue
+
         thread_model_manager ->> work_thread_impl: 实例化 WorkThread
         work_thread_impl -->> thread_model_manager: 返回 WorkThread 实例
-        thread_model_manager ->> thread_model_manager: 将实例放置 options.worker_threads
+        thread_model_manager ->> thread_model_manager: 将 WorkThread 添加至 options.worker_threads
     end
 
     thread_model_manager ->> thread_model: 传递 options 以实例化 ThreadModel
@@ -136,8 +149,6 @@ loop 循环初始化 ThreadModel
             io_model -->> work_thread_impl: 初始化完成
         else 线程属于 Handle 线程
             work_thread_impl ->> handle_model: 通知初始化
-            handle_model -> handle_impl: 通知初始化（其实 handle_impl 什么都不做）
-            handle_impl --> handle_model: 返回
             handle_model -->> work_thread_impl: 初始化完成
         end
         work_thread_impl -->> thread_model: 初始化完成
@@ -147,7 +158,7 @@ loop 循环初始化 ThreadModel
     thread_model_manager ->> thread_model: Start ThreadModel
     loop 循环启动 WorkThread
         thread_model ->> work_thread_impl: 启动线程
-        work_thread_impl ->> work_thread_impl: 启动线程，线程中会区分 io_model 和 handle_model 进行调用
+        work_thread_impl ->> work_thread_impl: 启动线程，线程中会区分 io_model 和 handle_model 使用不同的逻辑
         work_thread_impl -->> thread_model: 启动完成
     end
     thread_model -->> thread_model_manager: 启动完成
@@ -155,9 +166,114 @@ loop 循环初始化 ThreadModel
 end
 ```
 
+在 WorkThreadImpl 中实现了线程的启动，对于 IO 类型的线程和 Handle 类型的线程处理方式是不同的：
+
+```cpp
+void WorkerThreadImpl::Run() {
+  // 信号处理注册 ...
+
+  // 核绑定 ...
+
+  // 替换线程的名字 ...
+
+  if (options_.role == WorkerThread::Role::IO ||
+      options_.role == WorkerThread::Role::IO_HANDLE) {
+    options_.io_model->Run();
+  } else {
+    options_.handle_model->Run();
+  }
+}
+```
+
 ### Handle Thread Sequence Diagram
 
+Handle 线程是 Seperate 模式的工作线程，主要是：
+
+- 心跳上报（若配置开启）
+- 处理任务
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant work_thread_impl as WorkThreadImpl
+participant io_model as IO Model
+participant handle_model as Handle Model
+participant handle_impl as Default Handle Impl
+participant task_queue as Task Queue
+
+work_thread_impl ->> work_thread_impl: 线程启动
+
+work_thread_impl ->> work_thread_impl: 信号设置
+
+work_thread_impl ->> work_thread_impl: 绑核
+
+work_thread_impl ->> work_thread_impl: 设置线程名字
+
+alt 属于 IO 线程
+work_thread_impl ->> io_model: Run
+io_model -->> work_thread_impl: 线程退出
+else 属于 Handle 线程
+work_thread_impl ->> handle_model: Run
+
+alt 开启了 RPC 心跳上报
+    work_thread_impl ->> work_thread_impl: 心跳上报配置初始化
+end
+handle_model ->> handle_impl: Run
+
+loop !terminate_
+
+handle_impl ->> handle_impl: 检查是否满足心跳上报的条件，若满足则进行心跳上报
+handle_impl ->> handle_impl: 任务队列为空，等待 10 ms
+handle_impl ->> handle_impl: 获得超时任务
+loop 遍历超时任务
+    handle_impl ->> handle_impl: 执行超时任务
+end
+
+loop 遍历 Task
+    handle_impl ->> task_queue: 获取 Task
+    task_queue -->> handle_impl: 返回 Task
+    handle_impl ->> handle_impl: 执行任务
+end
+
+end
+
+handle_impl -->> handle_model: 线程退出
+
+handle_model -->> work_thread_impl: 线程退出
+end
+```
+
 ### IO Thread Sequence Diagram
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant work_thread_impl as WorkThreadImpl
+participant io_model as IO Model
+participant handle_model as Handle Model
+participant handle_impl as Default Handle Impl
+participant task_queue as Task Queue
+
+work_thread_impl ->> work_thread_impl: 线程启动
+
+work_thread_impl ->> work_thread_impl: 信号设置
+
+work_thread_impl ->> work_thread_impl: 绑核
+
+work_thread_impl ->> work_thread_impl: 设置线程名字
+
+alt 属于 IO 线程
+work_thread_impl ->> io_model: Run
+io_model -->> work_thread_impl: 线程退出
+else 属于 Handle 线程
+work_thread_impl ->> handle_model: Run
+handle_model ->> handle_impl: Run
+handle_impl -->> handle_model: 线程退出
+handle_model -->> work_thread_impl: 线程退出
+end
+```
 
 ## Thread Model Initial
 
@@ -305,6 +421,10 @@ struct Task {
 
 XRPC 中存在非常多的配置，这里将 Thread Model 涉及到的 Options 进行梳理。
 
+需要注意的，下面所有的 Options，均是在 ThreadModelManager 中进行初始化和设置的，直接传递给相关的对象进行使用。
+
+### ThreadModel::Options
+
 `ThreadModel::Options` 是 ThreadModel 的配置，主要是告知 ThreadModel 其模型 ID，以及线程池。
 
 ```cpp
@@ -314,5 +434,60 @@ class ThreadModel {
     uint16_t threadmodel_id;                                        // 当前线程模型实例的唯一id
     std::vector<std::unique_ptr<WorkerThread>> worker_threads;      // 线程集合
   };
-}
+};
+```
+
+### WorkerThreadImpl::Options
+
+`WorkerThreadImpl::Options` 是线程的工作配置，最重要的是指定了其线程类型，以及实际执行的逻辑的 io_model 和 handle_model。
+
+```cpp
+class WorkerThread {
+ public:
+  // 线程角色
+  enum class Role {
+    IO = 0x01,
+    HANDLE = 0x10,
+    IO_HANDLE = 0x11,
+  };
+};
+
+class WorkerThreadImpl : public WorkerThread {
+ public:
+  struct Options {
+    // 当前工作线程的工作角色，决定使用 IO 线程还是 Handle 线程处理
+    WorkerThread::Role role;
+
+    // 当前工作线程的逻辑 id，在 ThreadModelManager 进行相关线程初始化的时候设置
+    // id = ((threadmodel_id << 16) + i);
+    uint32_t id;
+
+    // IO 线程处理对象
+    std::unique_ptr<IoModel> io_model;
+
+    // Handle 线程处理对象
+    std::unique_ptr<HandleModel> handle_model;
+  };
+};
+```
+
+### DefaultIoModelImpl::Options
+
+`DefaultIoModelImpl::Options` 是 IO Model 的配置，最重要的是其包装的 Reactor，这是 IO 线程进行网络操作的核心对象。
+
+```cpp
+class DefaultIoModelImpl : public IoModelImplBase {
+ public:
+  struct Options {
+    // 每个 iomodel会 在具体线程模型里的某一个工作线程运行
+    // 因此，此逻辑 id 需要与其绑定的工作线程 id 一致
+    uint32_t id;
+
+    // 所属线程模型的instance_name
+    std::string instance_name;
+
+    // iomodel默认采用reactor模型实现
+    std::unique_ptr<Reactor> reactor;
+  };
+};
 ```
