@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import base64
-import jwt
 
 from optparse import OptionParser
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -16,8 +15,8 @@ def parse_args():
 
 def n_e_from_pem(pem):
     p = load_pem_public_key(pem)
-    n = base64.urlsafe_b64encode(p.public_numbers().n.to_bytes(257, byteorder='big', signed=True))
-    e = base64.urlsafe_b64encode(p.public_numbers().e.to_bytes(3, byteorder='big', signed=True))
+    n = base64.urlsafe_b64encode(p.public_numbers().n.to_bytes(256, byteorder='big'))
+    e = base64.urlsafe_b64encode(p.public_numbers().e.to_bytes(3, byteorder='big'))
     return n, e
 
 

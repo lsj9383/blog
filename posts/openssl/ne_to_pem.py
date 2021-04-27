@@ -1,30 +1,43 @@
 #!/usr/bin/env python
 
 import base64
-import jwt
 
 from optparse import OptionParser
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
 
 
 def parse_args():
     parser = OptionParser()
 
-    parser.add_option("-e", "--exponent", dest="exponent", help="The RSA public key exponent")
     parser.add_option("-n", "--modulus", dest="modulus", help="The RSA public key modulus")
+    parser.add_option("-e", "--exponent", dest="exponent", help="The RSA public key exponent")
     return parser.parse_args()
 
 
-def n_e_from_pem(modulus, exponent):
-    p = load_pem_public_key(pem)
-    n = base64.urlsafe_b64encode(p.public_numbers().n.to_bytes(257, byteorder='big', signed=True))
-    e = base64.urlsafe_b64encode(p.public_numbers().e.to_bytes(3, byteorder='big', signed=True))
-    return n, e
+def urlsafe_b64decode(data):
+    missing_padding = 4 - len(data) % 4
+    if missing_padding:
+        data += '=' * missing_padding
+    return base64.urlsafe_b64decode(data)
+
+
+def pem_from_n_e(modulus, exponent):
+    decode_n = urlsafe_b64decode(modulus)
+    decode_e = urlsafe_b64decode(exponent)
+    int_n = int.from_bytes(decode_n, byteorder='big')
+    int_e = int.from_bytes(decode_e, byteorder='big')
+    pub_key = rsa.RSAPublicNumbers(int_e, int_n).public_key()
+    pem = pub_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return pem.decode("utf-8")
 
 
 def main():
     options, _ = parse_args()
-
     pem = pem_from_n_e(options.modulus, options.exponent)
     print(pem)
 
