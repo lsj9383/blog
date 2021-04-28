@@ -5,7 +5,7 @@
 - [XRPC Thread Model](#xrpc-thread-model)
     - [Overview](#overview)
     - [Quick Start](#quick-start)
-    - [Structure](#structure)
+    - [UML Class Diagram](#uml-class-diagram)
     - [Sequence Diagram](#sequence-diagram)
         - [Initial Sequence Diagram](#initial-sequence-diagram)
         - [Handle Thread Run Sequence Diagram](#handle-thread-run-sequence-diagram)
@@ -16,6 +16,8 @@
         - [Server Initial](#server-initial)
         - [Client Initial](#client-initial)
     - [Task](#task)
+        - [Handle Timer Task](#handle-timer-task)
+        - [IO Timer Task](#io-timer-task)
     - [ThreadModel](#threadmodel)
     - [ThreadModelManager](#threadmodelmanager)
         - [Defualt Thread Model](#defualt-thread-model)
@@ -85,6 +87,27 @@ xrpc::TaskResult result = thread_model->SubmitHandleTask(task);
 
 ```c++
 auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+xrpc::TimerTaskInfo* timer_task_info = new xrpc::TimerTaskInfo();
+timer_task_info->cancel = false;
+timer_task_info->expiration = xrpc::TimeProvider::GetNowMs() + 1000;
+timer_task_info->interval = 5000;     // ms
+timer_task_info->executor = [=]() {
+    auto tid = std::this_thread::get_id();
+    std::cout << "tid:" << tid << std::endl;
+};
+
+xrpc::Task* timer_task = new xrpc::Task;
+timer_task->group_id = thread_model->GetThreadModelId();
+timer_task->task_type = xrpc::TaskType::TIMER;
+timer_task->task = reinterpret_cast<void*>(timer_task_info);
+timer_task->handler = nullptr;
+thread_model->SubmitTimerTask(timer_task);
+```
+
+若提交 Timer Task 的线程并非 ThreadModel 的线程，则需要包装一个在 ThreadModel 中运行的 Task，再在该 Task 中提交 Timer Task，如下所示：
+
+```c++
+auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
 xrpc::Task* task = new xrpc::Task;
 task->group_id = thread_model->GetThreadModelId();
 task->task_type = xrpc::TaskType::TRANSPORT_REQUEST;
@@ -111,36 +134,180 @@ task->handler = [=](xrpc::Task* task) {
 thread_model->SubmitHandleTask(task);
 ```
 
-## Structure
+## UML Class Diagram
 
 线程模型中涉及到的对象是非常多的，XRPC 对线程模型进行了层层抽象与封装。
 
 XRPC Thread Model 涉及到如下对象：
 
-- ThreadModelManager，线程模型管理器，可以拥有多个 ThreadModel。
-- ThreadModel，线程模型，一个线程模型管理了一个线程池，线程池中的对象是 WorkThread。
-- WorkThread，对线程的抽象，该对象并不实际负责处理逻辑，而是交由 WorkThradImpl 完成处理逻辑。
-  - WorkThradImpl，负责线程的初始化、启动、销毁等逻辑，对任务的处理交由 io_model 或 handle_model 完成。
-- HandleModel，Handle 线程处理对象，负责定时任务、队列任务的循环处理。
-- IoModel，IO 线程处理对象，除了对定时任务、队列中任务进行处理外，还负责重要的调度 Reactor 处理网络事件。
+- ThreadModelManger
+- ThreadModel
+- WorkerThread
+  - WorkerThreadImpl
+  - WorkerThreadImplOptions
+- HandleModel
+  - HandleModelOptions
+  - Handle
+  - DefaultSeperateHandleImpl
+- IoModel
+  - IoModelOptions
+  - IoModelImplBase
+  - DefaultIoModelImpl
 
 ```mermaid
 classDiagram
 
+    ThreadModelManger "1" --> "1..*" ThreadModel
+    ThreadModel "1" --> "1..*" WorkerThread
+    WorkerThread <|-- WorkerThreadImpl
+    WorkerThreadImpl --> WorkerThreadImplOptions
+
+    WorkerThreadImplOptions --> HandleModel
+    WorkerThreadImplOptions --> IoModel
+
+    HandleModel --> HandleModelOptions
+    HandleModelOptions --> Handle
+    Handle <|-- DefaultSeperateHandleImpl
+
+    IoModel --> IoModelOptions
+    IoModelOptions --> IoModelImplBase
+    IoModelImplBase <|-- DefaultIoModelImpl
+    DefaultIoModelImpl --> DefaultIoModelImplOptions
+
+
     class ThreadModelManger {
+        +std::map<std::string, ThreadModel> threadmodel_instances_
+        +ThreadModel default_threadmodel_instance_
+        +GetDefaultThreadModel() ThreadModel
+        +GetThreadModel(type, instance_name) ThreadModel
     }
 
     class ThreadModel {
+        +std::vector<WorkerThread> io_threads_
+        +std::vector<WorkerThread> handle_threads_
+        +Start()
+        +Stop()
+        +Join()
+        +Destory() int
+        +SubmitIoTask(ask) TaskResult
+        +SubmitHandleTask(task) TaskResult
+        +SubmitTimerTask(task) TaskResult
     }
 
     class WorkerThread {
+        +Start()
+        +Stop()
+        +Join()
+        +Destory()
+        +GetIoModel() IoModel
+        +GetHandleModel() HandleModel
     }
 
     class WorkerThreadImpl {
+        +WorkerThreadImplOptions options_
+        +Start()
+        +Stop()
+        +Join()
+        +Destory()
+        +GetIoModel() IoModel
+        +GetHandleModel() HandleModel
+    }
+
+    class WorkerThreadImplOptions {
+        +Role role
+        +IoModel io_model
+        +HandleModel handle_model
+    }
+
+    class HandleModel {
+        +HandleModelOptions options_
+        +TaskQueue task_queue_
+        +HeartbeatStat heartbeat_stat_
+        +Run()
+        +Stop()
+        +Join()
+        +Destory() int
+        +CreateTimer(task) int
+        +CancelTimer(timer_id) int
+        +SubmitTask(task) TaskResult
+    }
+
+    class HandleModelOptions {
+        +string instance_name
+        +Handle handle
+    }
+
+    class Handle {
+        +Run()
+        +Stop()
+        +Join()
+        +Destory() int
+        +HeartBeat()
+        +CreateTimer(task) int
+        +CancelTimer(timer_id) int
+        +SubmitTask(task) TaskResult
+    }
+
+    class DefaultSeperateHandleImpl {
+        +Run()
+        +Stop()
+        +Join()
+        +Destory() int
+        +HeartBeat()
+        +CreateTimer(task) int
+        +CancelTimer(timer_id) int
+        +SubmitTask(task) TaskResult
+    }
+
+    class IoModel {
+        +IoModelOptions options_
+        +Run()
+        +Stop()
+        +Join()
+        +Destory() int
+        +SubmitTask(task) TaskResult
+    }
+
+    class IoModelOptions {
+        +IoModelImplBase io_model_impl
+    }
+
+    class IoModelImplBase {
+        +Run()
+        +Stop()
+        +Join()
+        +Destory() int
+        +SubmitTask(task) TaskResult
+    }
+
+    class DefaultIoModelImpl {
+        +string instance_name
+        +Reactor reactor
+        +HeartbeatStat heartbeat_stat_
+        +TaskQueue task_queue_
+        +Run()
+        +Stop()
+        +Join()
+        +Destory() int
+        +SubmitTask(task) TaskResult
+    }
+
+    class DefaultIoModelImplOptions {
+        +string instance_name;
+        +Reactor reactor;
     }
 ```
 
+**注意：**
+
+- IoModel 没有 CreateTimer 方法，是因为其通过 SubmitTask 实现了提交定时器任务（在 Task 中配置定时器信息）。
+- 上述仅列出了类中重要和常用的遍历和方法，并非是全部。
+- IoModel 依赖了 Reactor，这部分会在 [Network Model](../xrpc-network-model/readme.md) 中详细描述。
+- 每个 Thread 都有个独立的任务队列。
+
 ## Sequence Diagram
+
+这里会展示 ThreadModel 相关的初始化、交互时序图。
 
 ### Initial Sequence Diagram
 
@@ -617,6 +784,10 @@ struct Task {
   int dst_thread_key = -1;      // 分发 Task 到哪个线程中运行，这个是线程的索引（并非线程 ID），-1 则随机分发。
 };
 ```
+
+### Handle Timer Task
+
+### IO Timer Task
 
 ## ThreadModel
 
