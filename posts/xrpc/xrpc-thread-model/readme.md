@@ -18,6 +18,8 @@
     - [Task](#task)
         - [Task Queue](#task-queue)
     - [Timer Task](#timer-task)
+        - [Handle Thread Timer](#handle-thread-timer)
+        - [IO Thread Timer](#io-thread-timer)
     - [ThreadModelManager](#threadmodelmanager)
         - [Defualt Thread Model](#defualt-thread-model)
     - [ThreadModel](#threadmodel)
@@ -958,8 +960,108 @@ timer_task->handler = nullptr;      // task->handler 可以忽略，实际的执
 
 IO Thread 和 Handle Thread 实现 Timer 的差别是较大的：
 
-- 对于 Handle Thread
-- 对于 IO Thread
+- 对于 Handle Thread，提供 TaskTimer 以处理定时任务。
+- 对于 IO Thread，提供 TimerQueue 以处理定时任务。
+
+他们最大的区别在于提交给 Thread 的接口以及超时检测机制：
+
+- 接口不统一可能是因为历史遗留所致。
+- 超时检测机制，在 Handle Thread 中为轮询，在 IO Thread 为 epoll。
+
+### Handle Thread Timer
+
+Handle Thread 的 Time Task 提交是一个区别于其他 Task 的接口 `CreateTimer`：
+
+```cpp
+int DefaultSeperateHandleImpl::CreateTimer(Task* task) {
+  return task_timer_.CreateTimer(task);
+}
+```
+
+Handle Thread 的 Timer 通过 TaskTimer 实现，对于 TaskTimer 中的超时事件感知是通过在 Handle Thread 中轮询检查实现的：
+
+```cpp
+void DefaultSeperateHandleImpl::Run() {
+  while (!terminate_) {
+
+    if (task_queue_->Size() == 0) {
+      task_queue_->Wait(10);
+    }
+
+    // 获取超时的任务
+    auto timeout_tasks = task_timer_.GetExpireTasks();
+    for (auto task : timeout_tasks) {
+      TimerTaskInfo* timer_task_info = reinterpret_cast<TimerTaskInfo*>(task->task);
+      timer_task_info->executor();
+    }
+
+    while (true) {
+      // ... 处理 Task Queue
+    }
+  }
+}
+```
+
+### IO Thread Timer
+
+IO Thread 的 Timer 通过 TimerQueue 实现，而 TimerQueue 是继承于 EventHandler，也就是作为一个事件处理存在。
+
+IO Thread 的 Timer Task 提交和普通 Task 的提交是完全一致的，框架会根据 task->task 的信息判断是否为 Timer Task，若为 Timer Task 则提交值 TimerQueue：
+
+```cpp
+void DefaultIoModelImpl::SubmitTask(Task* task) {
+  if (task->task_type != TaskType::TIMER) {
+    // ... 添加至 Task Queue
+  }
+
+  std::thread::id tid = std::this_thread::get_id();
+  auto* timer_task_info = static_cast<TimerTaskInfo*>(task->task);
+
+  // 要求添加 Task 的线程和执行 Task 的线程是一致的
+  if (tid != tid_) {
+    return;
+  }
+
+  if (timer_task_info->cancel) {
+      options_.reactor->CancelTimer(timer_task_info->timer_id);
+  }
+
+  uint32_t timer_id = options_.reactor->AddTimerAt(timer_task_info->expiration,
+                                                   timer_task_info->interval,
+                                                   std::move(timer_task_info->executor));
+  result.result = reinterpret_cast<void*>(timer_id);
+}
+```
+
+从上述交互中可以看到 IO Thread 没有直接控制 TimerQueue，这是因为 TimerQueue 在 reactor 中：
+
+```cpp
+uint32_t ReactorImpl::AddTimerAt(uint64_t expiration, uint64_t interval, TimerExecutor&& executor) {
+  return timer_queue_->AddTimerAt(expiration, interval, std::move(executor));
+}
+```
+
+TimerQueue 会生成 timer fd，并挂载到 epoll 上，等待 epoll 触发：
+
+```cpp
+void TimerQueue::EnableTimerEvent() {
+    EnableEvent(EventType::READ_EVENT);
+    options_.reactor->AddEventHandler(this);
+}
+
+void TimerQueue::HandleReadEvent() {
+  auto now = TimeProvider::GetNowMs();
+
+  TRPC_LOG_TRACE("TimerQueue::HandleReadEvent now:" << now);
+
+  auto expire_tasks = task_timer_.GetExpireTasks();
+  for (auto task : expire_tasks) {
+    TimerTaskInfo* timer_task_info = reinterpret_cast<TimerTaskInfo*>(task->task);
+    timer_task_info->executor();
+  }
+  UpdateTimerFd(task_timer_.NextExpiration(), true);
+}
+```
 
 ## ThreadModelManager
 
