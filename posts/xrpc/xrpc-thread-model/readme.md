@@ -16,11 +16,12 @@
         - [Server Initial](#server-initial)
         - [Client Initial](#client-initial)
     - [Task](#task)
-        - [Handle Timer Task](#handle-timer-task)
-        - [IO Timer Task](#io-timer-task)
-    - [ThreadModel](#threadmodel)
+        - [Task Queue](#task-queue)
+    - [Timer Task](#timer-task)
     - [ThreadModelManager](#threadmodelmanager)
         - [Defualt Thread Model](#defualt-thread-model)
+    - [ThreadModel](#threadmodel)
+    - [WorkThread](#workthread)
     - [Options](#options)
         - [ThreadModel::Options](#threadmodeloptions)
         - [WorkerThreadImpl::Options](#workerthreadimploptions)
@@ -140,19 +141,19 @@ thread_model->SubmitHandleTask(task);
 
 XRPC Thread Model 涉及到如下对象：
 
-- ThreadModelManger
-- ThreadModel
-- WorkerThread
-  - WorkerThreadImpl
-  - WorkerThreadImplOptions
-- HandleModel
-  - HandleModelOptions
-  - Handle
-  - DefaultSeperateHandleImpl
-- IoModel
-  - IoModelOptions
-  - IoModelImplBase
-  - DefaultIoModelImpl
+- ThreadModelManger，线程模型管理，根据配置可以初始化多个 ThreadModel 实例
+- ThreadModel，线程模型，本质上就是线程池，管理了多个 WorkThread
+- WorkerThread，线程抽象累
+  - WorkerThreadImpl，线程实现，负责线程的启动
+  - WorkerThreadImplOptions，线程配置，管理 IoModel 和 HandleModel
+- HandleModel，IO 模型
+  - HandleModelOptions，Handle 线程配置，管理 Handle 对象
+  - Handle，Handle 线程逻辑抽象
+  - DefaultSeperateHandleImpl，Handle 线程逻辑实现
+- IoModel，IO 模型
+  - IoModelOptions，IO 线程配置，管理 IoModelImplBase 对象
+  - IoModelImplBase，IO 线程逻辑抽象
+  - DefaultIoModelImpl，IO 线程逻辑实现
 
 ```mermaid
 classDiagram
@@ -785,15 +786,241 @@ struct Task {
 };
 ```
 
-### Handle Timer Task
+构造一个 Task：
 
-### IO Timer Task
+```cpp
+xrpc::Task* task = new xrpc::Task();
+task->group_id = thread_model->GetThreadModelId();      // 线程模型 ID
+task->task_type = TaskType::TRANSPORT_REQUEST;          // 任务的类型
+task->dst_thread_key = -1;                              // 随机选择一个 Worker 执行 Task
+task->handler = [](Task* task) mutable {
+    std::cout << "hello world" << std::endl;
+};
+```
 
-## ThreadModel
+Task.dst_thread_key 指定了执行 Task 的线程，其取值并非为线程 ID，而是在 ThreadModel 中的线程数组索引（IO 和 Handle 的线程数组是独立的，索引也是独立的），取值为 -1 时会通过轮询的方式投递 Task 到线程。
+
+若希望始终线程 1 执行 Task：
+
+```cpp
+xrpc::Task* task = new xrpc::Task();
+task->group_id = thread_model->GetThreadModelId();      // 线程模型 ID
+task->task_type = TaskType::TRANSPORT_REQUEST;          // 任务的类型
+task->dst_thread_key = 0;
+```
+
+若期 Task 由当前线程自己运行，则可以通过如下设置：
+
+```cpp
+xrpc::Task* task = new xrpc::Task();
+task->group_id = thread_model->GetThreadModelId();      // 线程模型 ID
+task->task_type = TaskType::TRANSPORT_REQUEST;          // 任务的类型
+task->dst_thread_key = WorkerThread::GetCurrentWorkerThread()->Id() & 0xFFFF;
+```
+
+可以看到这里 `Id() & 0xFFFF`，这是因为 `GetCurrentWorkerThread()->Id()` 高 16 bit 为 ThreadModel ID，低 16 bit 才是线程在 ThreadModel 的索引，我们这里应该使用低 16 bit，具体请参考 [WorkThread](#workthread)。
+
+### Task Queue
+
+提交一个 Task 给线程执行，本质上是提交给 Task Queue 进行缓存，线程会在空闲的时候从 Task Queue 中获取 Task 运行。
+
+每个线程都有自己的一个 Task Queue，因此当给特定的 Task Queue 投递 Task 时，实际上就指定了运行该 Task 的线程：
+
+```txt
+                                     +------------+               +---------------+
+                         +-------->  | Task Queue | <--- Pull --- | Worker Thread |
+                         |           +------------+               +---------------+
+                         |
++----------+             |           +------------+               +---------------+
+|   User   | --- Submit -+-------->  | Task Queue | <--- Pull --- | Worker Thread |
++----------+             |           +------------+               +---------------+
+                         |
+                         |           +------------+               +---------------+
+                         +---------> | Task Queue | <--- Pull --- | Worker Thread |
+                                     +------------+               +---------------+
+```
+
+Task Queue 提供的接口如下：
+
+```mermaid
+classDiagram
+
+    class TaskQueue {
+        +Init() int
+        +Destory() int
+        +Push(Task) bool
+        +Pop(Task) bool
+        +Notify()
+        +Size() uint32_t
+        +Capacity() uint32_t
+        +Wait(timeout_ms)
+    }
+```
+
+IO Thread 和 Handle Thread 使用的 Task Queue 实例是不一样的：
+
+- Handle Thread 使用 DefaultNotifierTaskQueue
+- IO Thread 使用 EventFdNotifierTaskQueue
+
+对于 DefaultNotifierTaskQueue 而言，提供了以下能力：
+
+- 提供了无锁队列 LockFreeQueue。
+- 提供了所有 Handle 线程共享的一个 Task Queue 即 share_task_queue，在 `task.dst_thread_key < 0` 时，task 会被投递到 share_task_queue。
+- 提供了 ThreadLockNotifier，运行线程任务时 Wait 挂起，也可以在 Push 新 Task 时去唤醒线程。
+
+对于 EventFdNotifierTaskQueue 而言，提供以下能力：
+
+- 提供了无锁队列 LockFreeQueue。
+- 提供 EventFdNotifier，可以将 epoll wait 的等待唤醒（原理是 epoll 挂载一个并非用于网络事件的 fd，通过给该 fd 写数据进行唤醒）。
+
+  ```cpp
+  void EventFdNotifier::WakeUp() {
+    uint64_t value = 1;
+
+    ssize_t n = write(fd_, &value, sizeof(value));
+
+    assert(n == sizeof(n));
+  }
+  ```
+
+- 在 TaskQueue 唤醒时自动对 Task 进行处理。
+
+  ```cpp
+  EventFdNotifierTaskQueue::EventFdNotifierTaskQueue(const Options& options)
+        : options_(options) {
+    int ret = task_queue_.Init(options_.queue_size);
+    assert(ret == LockFreeQueue<Task*>::RT_OK);
+
+    Reactor* reactor = options_.io_model->GetReactor();
+    Notifier::Options notifier_options;
+    notifier_options.event_handler_id = reactor->GenEventHandlerId();
+    notifier_options.reactor = reactor;
+    // 唤醒时进行处理
+    notifier_options.wakeup_function = [this]() {
+      Task *task = nullptr;
+
+      while (this->Pop(&task)) {
+      if (task->task_type != TaskType::FINISH) {
+        task->handler(task);
+      }
+      delete task;
+      task = nullptr;
+      }
+    };
+
+    notifier_ = new EventFdNotifier(notifier_options);
+  }
+  ```
+
+## Timer Task
+
+对一个 Task 添加了 Timer 信息后，该 Task 便成为了 Timer Task，可以提交给 ThreadModel 并在特定的时间执行。
+
+Timer Task 的信息如下：
+
+```cpp
+struct TimerTaskInfo {
+  // 是否取消
+  bool cancel = false;
+
+  // 毫秒
+  uint64_t expiration;
+
+  // 重复执行间隔，为0不重复执行
+  uint64_t interval;
+
+  // 定时任务执行体
+  TimerExecutor executor;
+
+  // timer id, 取消定时任务时使用
+  uint32_t timer_id;
+};
+```
+
+当 TimerTaskInfo 放到 task->task ，并且设置 task->task_type 为 `xrpc::TaskType::TIMER` 时，task 便成为了 Timer Task，这是一个创建 Timer Task 的示例：
+
+```cpp
+xrpc::TimerTaskInfo* timer_task_info = new xrpc::TimerTaskInfo();
+timer_task_info->cancel = false;
+timer_task_info->expiration = xrpc::TimeProvider::GetNowMs() + 1000;
+timer_task_info->interval = 5000;     // ms
+timer_task_info->executor = [=]() {
+    auto tid = std::this_thread::get_id();
+    std::cout << "tid:" << tid << std::endl;
+};
+
+xrpc::Task* timer_task = new xrpc::Task;
+timer_task->group_id = thread_model->GetThreadModelId();
+timer_task->task_type = xrpc::TaskType::TIMER;
+timer_task->task = reinterpret_cast<void*>(timer_task_info);
+timer_task->handler = nullptr;      // task->handler 可以忽略，实际的执行逻辑在 timer_task->task->executor 中
+```
+
+IO Thread 和 Handle Thread 实现 Timer 的差别是较大的：
+
+- 对于 Handle Thread
+- 对于 IO Thread
 
 ## ThreadModelManager
 
+ThreadModelManager 用于管理 ThreadModel，而 ThreadModel 本质上就是线程池，可以参考 [ThreadModel](#threadmodel)。
+
+ThreadModelManager 的工作是非常重要的，所有的 ThreadModel 及其涉及到的组件初始化均在 ThreadModelManager 完成，在初始化了所有的对象后会把对象传递给 ThreadModel 进行管理，包括但不限于：
+
+- 初始化线程逻辑处理对象
+- 初始化线程的 Task Queue
+- 初始化 Reactor
+- 初始化各种 options
+- 初始化 IO Model/Handle Model
+- 初始化线程
+
+ThreadModelManager 另外一个重要的事情就是如何存储 ThreadModel，可以参考如下示例：
+
+```cpp
+class ThreadModelManager {
+ public:
+  ThreadModel* GetThreadModel(ThreadModelType type, const std::string& instance_name) {
+    ThreadModel* thread_model = nullptr;
+    if (type == ThreadModelType::DEFAULT) {
+        return threadmodel_instances_[instance_name];
+    } else {
+        // 目前写死
+        return fiber_threadmodel_instance_;
+    }
+    return thread_model;
+  }
+
+ private:
+  std::unordered_map<std::string, ThreadModel*> threadmodel_instances_;
+};
+```
+
+其中 threadmodel_instances_ 的 key 就是 threadmodel 的名称，是 yaml 配置文件中的 `global.threadmodel.default[x].instance_name`。
+
 ### Defualt Thread Model
+
+Default Thread Model 指的是 ThreadModelType 为 Default，且 instance_name 为 `default_instance` 的 ThreadModel。
+
+通过如下两种方式可以获得 Default Thread Model：
+
+```cpp
+ThreadModelManager::GetThreadModel(ThreadModelType::DEFAULT, "defualt_instance");
+ThreadModelManager::GetDefaultThreadModel();
+```
+
+若在 yaml 文件中没有配置 `ThreadModelType::DEFAULT, "defualt_instance"` 的 Thread Model，则框架会自动创建，并且属性为：
+
+```cpp
+DefaultThreadModelInstanceConfig default_threadmodel_instance_config;
+default_threadmodel_instance_config.instance_name = "default_instance";
+default_threadmodel_instance_config.io_handle_type = "merge";
+default_threadmodel_instance_config.io_thread_num = 1;
+default_threadmodel_instance_config.handle_thread_num = 0;
+```
+
+## ThreadModel
+
+## WorkThread
 
 ## Options
 
