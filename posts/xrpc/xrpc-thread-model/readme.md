@@ -28,6 +28,7 @@
         - [ThreadModel::Options](#threadmodeloptions)
         - [WorkerThreadImpl::Options](#workerthreadimploptions)
         - [DefaultIoModelImpl::Options](#defaultiomodelimploptions)
+        - [HandleModel::Options](#handlemodeloptions)
 
 <!-- /TOC -->
 
@@ -1171,6 +1172,17 @@ default_threadmodel_instance_config.handle_thread_num = 0;
 
 ThreadModel 本质上在 default 模式下就是线程池，但线程池中的线程对象的构建并非在 ThreadModel 中，而是在 ThreadModelManager 中。
 
+ThreadModel 的重要属性有：
+
+- ThreadModel id，该 ID 用于区分不同的 ThreadModel 实例，取值从 0 开始递增。在 ThreadModelManager 中初始化该 ID：
+
+  ```cpp
+  // std::atomic<uint16_t> gen_threadmodel_id_;
+  uint16_t threadmodel_id = gen_threadmodel_id_.fetch_add(1, std::memory_order_relaxed);
+  ```
+
+- IO 线程集合与 Handle 线程集合。
+
 ThreadModel 构造时会根据传入的线程池集合类型，划分为 IO Threads 和 Handle Threads 进行存储：
 
 ```cpp
@@ -1358,6 +1370,153 @@ TaskResult ThreadModel::SubmitTimerTask(Task* task) {
 
 ## WorkThread
 
+WorkThread 是一个抽象类，在 xrpc 中 WorkThreadImpl 是其实现。
+
+WorkThread 存在着需要我们关注的属性：
+
+- Role，线程角色：
+
+  ```cpp
+  enum class Role {
+    IO = 0x01,
+    HANDLE = 0x10,
+    IO_HANDLE = 0x11,   // merge 模型使用
+  };
+  ```
+
+- WorkThread 逻辑 ID，该 ID 重要的原因是负责了 Task 到指定线程的分发。
+  - WorkThread 逻辑 ID 组成格式如下：
+
+    ```text
+    +-----------------+-----------------+
+    |   High 16 Bits  |   Low 16 Bits   |
+    +-----------------+-----------------+
+    | ThreadModel ID  |  Threads Index  |
+    +-----------------+-----------------+
+    ```
+
+    - 其中 ThreadModel ID 从 0 开始， 请参考 [ThreadModel](#threadmodel)。
+    - 其中 Threads Index 是 WorkThread 在 ThreadModel 线程池中的索引编号。
+
+  - 该 ID 在 ThreadManager 中进行初始化：
+
+    ```cpp
+    for () {
+      // ...
+      WorkerThreadImpl::Options worker_thread_options;
+      worker_thread_options.id = ((threadmodel_id << 16) + i);
+      // ...
+      auto worker_thread = std::make_unique<WorkerThreadImpl>(std::move(worker_thread_options));
+      thread_model_options.worker_threads.emplace_back(std::move(worker_thread));
+    }
+    ```
+  
+  - 线程对象：`std::unique_ptr<std::thread> thread_`。
+
+WorkThreadImpl 的初始化会根据 Role 对 IoModel 和 HandleModel 进行初始化：
+
+```cpp
+int WorkerThreadImpl::Initialize() {
+  if (options_.role == WorkerThread::Role::IO ||
+      options_.role == WorkerThread::Role::IO_HANDLE) {
+    return options_.io_model->Initialize();
+  }
+
+  return options_.handle_model->Initialize();
+}
+```
+
+WorkThreadImpl 代理了 `std::thread` 的启动、关闭等行为：
+
+```cpp
+int WorkerThreadImpl::Initialize() {
+  if (options_.role == WorkerThread::Role::IO ||
+      options_.role == WorkerThread::Role::IO_HANDLE) {
+    return options_.io_model->Initialize();
+  }
+
+  return options_.handle_model->Initialize();
+}
+
+void WorkerThreadImpl::Start() {
+  // 线程执行 Run 方法
+  thread_ = std::make_unique<std::thread>([this]() {
+    this->Run();
+  });
+}
+
+void WorkerThreadImpl::Stop() {
+  if (thread_) {
+    if (options_.role == WorkerThread::Role::IO ||
+        options_.role == WorkerThread::Role::IO_HANDLE) {
+      options_.io_model->Stop();
+    } else {
+      options_.handle_model->Stop();
+    }
+
+    thread_->join();
+    thread_.reset();
+  }
+}
+
+void WorkerThreadImpl::Join() {
+  if (thread_) {
+    thread_->join();
+    thread_.reset();
+  }
+}
+
+int WorkerThreadImpl::Destory() {
+  if (options_.role == WorkerThread::Role::IO ||
+      options_.role == WorkerThread::Role::IO_HANDLE) {
+    options_.io_model->Destory();
+  } else {
+    options_.handle_model->Destory();
+  }
+
+  return 0;
+}
+```
+
+WorkThread 在线程中的逻辑：
+
+```cpp
+void WorkerThreadImpl::Run() {
+  sigset_t signal_mask;
+  sigemptyset(&signal_mask);
+  sigaddset(&signal_mask, SIGPIPE);
+  pthread_sigmask(SIG_BLOCK, &signal_mask, NULL);
+
+
+  // 是否开启绑核，默认开启
+  if (XrpcConfig::GetInstance()->GetGlobalConfig().enable_bind_core) {
+    auto bind_ret = BindCoreManager::BindCore();
+  }
+
+  WorkerThread::SetCurrentWorkerThread(this);
+
+  // 替换线程的名字，top时可以看到具体线程的名字
+  std::string thread_name("");
+  if (options_.role == WorkerThread::Role::IO ||
+      options_.role == WorkerThread::Role::IO_HANDLE) {
+    thread_name += "iothread_";
+    thread_name += std::to_string(options_.id);
+  } else {
+    thread_name += "handlethread_";
+    thread_name += std::to_string(options_.id);
+  }
+
+  prctl(PR_SET_NAME, thread_name.c_str(), NULL, NULL, NULL);
+
+  if (options_.role == WorkerThread::Role::IO ||
+      options_.role == WorkerThread::Role::IO_HANDLE) {
+    options_.io_model->Run();
+  } else {
+    options_.handle_model->Run();
+  }
+}
+```
+
 ## Options
 
 XRPC 中存在非常多的配置，这里将 Thread Model 涉及到的 Options 进行梳理。
@@ -1431,4 +1590,23 @@ class DefaultIoModelImpl : public IoModelImplBase {
     std::unique_ptr<Reactor> reactor;
   };
 };
+```
+
+### HandleModel::Options
+
+```cpp
+class HandleModel {
+ public:
+  struct Options {
+    // 每个 handlemodel 会在具体线程模型里的某一个工作线程运行
+    // 因此，此 id 需要与其绑定的工作线程 id 一致
+    uint32_t id{0};
+
+    // 所属线程模型的 instance_name
+    std::string instance_name;
+
+    // handle 模型具体实现对象
+    std::unique_ptr<Handle> handle;
+  };
+}
 ```
