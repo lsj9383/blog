@@ -762,17 +762,17 @@ XRPC Client 分两种情况讨论：
 ```cpp
 int main(int argc, char *argv[]) {
   // 初始化配置文件，文件内容可以为空
-  trpc::TrpcConfig::GetInstance()->Init("test_client.yaml");
+  xrpc::XrpcConfig::GetInstance()->Init("test_client.yaml");
 
   // =====================================================
   // 初始化 ThreadModel 插件，这里会触发 ThreadModel 的初始化
   // =====================================================
-  trpc::TrpcPlugin::GetInstance()->InitThreadModel();
+  xrpc::XrpcPlugin::GetInstance()->InitThreadModel();
 
   // do something
 
   //  注销插件
-  trpc::TrpcPlugin::GetInstance()->DestroyThreadModel();
+  xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
 }
 ```
 
