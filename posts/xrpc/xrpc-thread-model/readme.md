@@ -176,6 +176,7 @@ classDiagram
     IoModelOptions --> IoModelImplBase
     IoModelImplBase <|-- DefaultIoModelImpl
     DefaultIoModelImpl --> DefaultIoModelImplOptions
+    DefaultIoModelImplOptions --> ReactorImpl
 
 
     class ThreadModelManger {
@@ -296,8 +297,27 @@ classDiagram
     }
 
     class DefaultIoModelImplOptions {
-        +string instance_name;
-        +Reactor reactor;
+        +string instance_name
+        +Reactor reactor
+    }
+
+    class ReactorImpl {
+        +std::vector<Task> tasks_
+        +TimerQueue timer_queue_
+        +EventHandlerManager event_handler_manager_
+        +AddTimerAt(expiration, interval, executor) uint32_t
+        +AddTimerAfter(expiration, interval, executor) uint32_t
+        +CancelTimer(timer_id)
+        +SubmitTask(Task&& task)
+        +Initialize() int
+        +Run()
+        +Stop()
+        +Join()
+        +Destory() int
+        +GenEventHandlerId() uint64_t
+        +AddEventHandler(EventHandler event_handler)
+        +ModEventHandler(EventHandler event_handler)
+        +DelEventHandler(EventHandler event_handler)
     }
 ```
 
@@ -307,6 +327,7 @@ classDiagram
 - 上述仅列出了类中重要和常用的遍历和方法，并非是全部。
 - IoModel 依赖了 Reactor，这部分会在 [Network Model](../xrpc-network-model/readme.md) 中详细描述。
 - 每个 Thread 都有个独立的任务队列。
+- ReactorImpl 有自己的任务队列，可以直接给 Reactor 提交 Task，而不经由 IoModel。
 
 ## Sequence Diagram
 
@@ -1051,9 +1072,6 @@ void TimerQueue::EnableTimerEvent() {
 
 void TimerQueue::HandleReadEvent() {
   auto now = TimeProvider::GetNowMs();
-
-  TRPC_LOG_TRACE("TimerQueue::HandleReadEvent now:" << now);
-
   auto expire_tasks = task_timer_.GetExpireTasks();
   for (auto task : expire_tasks) {
     TimerTaskInfo* timer_task_info = reinterpret_cast<TimerTaskInfo*>(task->task);
@@ -1121,6 +1139,193 @@ default_threadmodel_instance_config.handle_thread_num = 0;
 ```
 
 ## ThreadModel
+
+ThreadModel 本质上在 default 模式下就是线程池，但线程池中的线程对象的构建并非在 ThreadModel 中，而是在 ThreadModelManager 中。
+
+ThreadModel 构造时会根据传入的线程池集合类型，划分为 IO Threads 和 Handle Threads 进行存储：
+
+```cpp
+ThreadModel::ThreadModel(Options&& options) : options_(std::move(options)) {
+  for (auto& worker_thread : options_.worker_threads) {
+    if (worker_thread->GetRole() == WorkerThread::Role::IO ||
+        worker_thread->GetRole() == WorkerThread::Role::IO_HANDLE) {
+      io_threads_.push_back(worker_thread.get());
+    } else if (worker_thread->GetRole() == WorkerThread::Role::HANDLE) {
+      handle_threads_.push_back(worker_thread.get());
+    } else {
+      assert(false);
+    }
+  }
+}
+```
+
+ThreadModel 代理了线程池中所有线程对象的初始化、启动、停止、等待等相关操作：
+
+```cpp
+int ThreadModel::Initialize() {
+  for (auto& worker_thread : options_.worker_threads) {
+    worker_thread->Initialize();
+  }
+
+  return 0;
+}
+
+void ThreadModel::Start() {
+  for (auto& worker_thread : options_.worker_threads) {
+    worker_thread->Start();
+  }
+}
+
+void ThreadModel::Stop() {
+  for (auto& worker_thread : options_.worker_threads) {
+    worker_thread->Stop();
+  }
+}
+
+void ThreadModel::Join() {
+  for (auto& worker_thread : options_.worker_threads) {
+    worker_thread->Join();
+  }
+}
+
+int ThreadModel::Destory() {
+  for (auto& worker_thread : options_.worker_threads) {
+    worker_thread->Destory();
+  }
+
+  return 0;
+}
+```
+
+ThreadModel 对于应用代码而言，最重要的就是提交任务以及创建定时任务。
+
+对于 IO Task 和 Handle Task 是通过不同的方法进行提交的，IO Task 的提交接口是：`SubmitIoTask`。
+
+```cpp
+TaskResult ThreadModel::SubmitIoTask(Task* task) {
+  // task->group_id 一定要等于线程模型 ID
+  assert(task && task->group_id == options_.threadmodel_id);
+
+  WorkerThread* current = WorkerThread::GetCurrentWorkerThread();
+  // 若 Task 提交线程非 xrpc IO 线程，则提交给相应的 IO 线程
+  if (!current || current->GetRole() == WorkerThread::Role::HANDLE) {
+    uint16_t id = 0;
+    if (task->dst_thread_key < 0) {
+      thread_local static uint16_t index = 0;
+      id = index++ % io_threads_.size();
+    } else {
+      id = task->dst_thread_key % io_threads_.size();
+    }
+
+    return io_threads_[id]->GetIoModel()->SubmitTask(task);
+  }
+
+  // 若没有指定运行线程，则本 IO 线程执行 Task
+  uint16_t id = task->dst_thread_key < 0
+              ? current->Id()   // 本应该求 & 0xFFFF，但因为 id 为 uint16_t 所以不用求 & 0xFFFF
+              : task->dst_thread_key % io_threads_.size()
+
+  // 若目标 IO Thread 就是提交 Task 的线程，直接运行
+  uint32_t thread_id = ((task->group_id << 16) + id);
+  if (current->Id() == thread_id) {
+    task->handler(task);
+    delete task;
+    return kIgnoreTaskResult;
+  }
+
+  // 提交给指定 Task 的线程
+  return io_threads_[id]->GetIoModel()->SubmitTask(task);
+}
+```
+
+Handle Task 的提交接口是：`SubmitHandleTask`。
+
+```cpp
+TaskResult ThreadModel::SubmitHandleTask(Task* task) {
+  assert(task && task->group_id == options_.threadmodel_id);
+
+  thread_local static uint16_t index = 0;
+
+  // sepearete 模型
+  if (handle_threads_.size() > 0) {
+    uint16_t id = 0;
+    if (task->dst_thread_key < 0) {
+      id = index++ % handle_threads_.size();
+    } else {
+      id = task->dst_thread_key % handle_threads_.size();
+    }
+
+    // 提交线程不属于 Handle 线程
+    WorkerThread* current = WorkerThread::GetCurrentWorkerThread();
+    if (!current || current->GetRole() != WorkerThread::Role::HANDLE) {
+      return handle_threads_[id]->GetHandleModel()->SubmitTask(task);
+    }
+
+    // 如果提交线程就是分发目标 直接运行
+    if (current->Id() & 0xFFFF == id) {
+      task->handler(task);
+      delete task;
+      return kIgnoreTaskResult;
+    }
+
+    return handle_threads_[id]->GetHandleModel()->SubmitTask(task);
+  }
+  
+  // merge 模型
+  WorkerThread* current = WorkerThread::GetCurrentWorkerThread();
+  // 不属于 xrpc 线程 直接提交至 xrpc IO 线程
+  if (!current) {
+      uint16_t id = index++ % io_threads_.size();
+      return io_threads_[id]->GetHandleModel()->SubmitTask(task);
+  }
+
+  // 分发线程未指定 则自己运行
+  if (task->dst_thread_key < 0) {
+    task->handler(task);
+    delete task;
+    return kIgnoreTaskResult;
+  }
+
+  // 分发线程就是自己 直接运行
+  uint16_t id = task->dst_thread_key % io_threads_.size();
+  uint32_t thread_id = ((task->group_id << 16) + id);
+  if (current->Id() == thread_id) {
+      task->handler(task);
+      delete task;
+      task = nullptr;
+  }
+
+  return io_threads_[id]->GetHandleModel()->SubmitTask(task);
+}
+```
+
+Timer Task 的提交接口是：`SubmitTimerTask`：
+
+```cpp
+TaskResult ThreadModel::SubmitTimerTask(Task* task) {
+  assert(task && task->group_id == options_.threadmodel_id);
+
+  TaskResult result;
+
+  // seperate 模型
+  if (handle_threads_.size() > 0) {
+    // 不属于 xrpc 线程 或者提交线程非 Handle 线程 直接 core
+    WorkerThread* current = WorkerThread::GetCurrentWorkerThread();
+    if (!current || current->GetRole() != WorkerThread::Role::HANDLE) {
+      assert(false);
+    }
+    result.ret = current->GetHandleModel()->CreateTimer(task);
+    return result
+  }
+  
+  // merge 模型 不属于 xrpc 线程直接 core
+  WorkerThread* current = WorkerThread::GetCurrentWorkerThread();
+  if (!current) {
+    assert(false);
+  }
+  return current->GetIoModel()->SubmitTask(task);
+}
+```
 
 ## WorkThread
 
