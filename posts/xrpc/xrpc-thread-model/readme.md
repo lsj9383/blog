@@ -756,28 +756,23 @@ void XrpcApp::InitPlugins() { XrpcPlugin::GetInstance()->RegistryPlugins(); }
 
 XRPC Client 分两种情况讨论：
 
-- 由 XRPC Server 中运行的 Client，因为 XRPC Server 初始化时已经初始化 Thread Model 了，所以这种情况下不用额外再作任何初始化。
+- 在 XRPC Server 中，因为 XRPC Server 初始化时已经初始化 Thread Model 了，所以这种情况下不用额外再作任何初始化。
 - 纯 XRPC Client，需要手动触发。
 
 ```cpp
 int main(int argc, char *argv[]) {
-  // Initial...
+  // 初始化配置文件，文件内容可以为空
+  trpc::TrpcConfig::GetInstance()->Init("test_client.yaml");
 
-  // 获取客户端配置
-  xrpc::ClientConfig client_config = xrpc::XrpcConfig::GetInstance()->GetClientConfig();
-
-  // 创建客户端对象
-  xrpc::XrpcClient client(client_config);
-
-  // =======================================
-  // 初始化插件，这里会触发 ThreadModel 的初始化
-  // =======================================
-  xrpc::XrpcPlugin::GetInstance()->RegistryPlugins();
+  // =====================================================
+  // 初始化 ThreadModel 插件，这里会触发 ThreadModel 的初始化
+  // =====================================================
+  trpc::TrpcPlugin::GetInstance()->InitThreadModel();
 
   // do something
 
   //  注销插件
-  xrpc::XrpcPlugin::GetInstance()->UnregistryPlugins();
+  trpc::TrpcPlugin::GetInstance()->DestroyThreadModel();
 }
 ```
 
