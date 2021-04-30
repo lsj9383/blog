@@ -56,7 +56,6 @@ Default 线程模型本质上就是一个线程池，通过一个提交 Task 至
 
 ```yaml
 global:
-  local_ip: 127.0.0.1
   threadmodel:
     default:
       - instance_name: default_instance
@@ -69,16 +68,16 @@ global:
 
 ```c++
 // 通过线程模型的类型和名称获得线程模型
-// std::string threadmodel_type = "default";                       // default 是默认线程模型
-// std::string threadmodel_instance_name = "default_instance";     // default_instance 是线程模型的名字，线程模型的名字在 yaml 文件的 global 中定义
-// auto thread_model = ThreadModelManager::GetInstance()->GetThreadModel("default", "default_instance");
+// xrpc::ThreadModelType threadmodel_type = xrpc::ThreadModelType::DEFAULT;
+// std::string threadmodel_instance_name = "default_instance";
+// auto thread_model = ThreadModelManager::GetInstance()->GetThreadModel(threadmodel_type, threadmodel_instance_name);
 auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
 
 // 构建一个任务
 xrpc::Task* task = new xrpc::Task();
 task->group_id = thread_model->GetThreadModelId();      // 线程模型 ID
 task->task_type = TaskType::TRANSPORT_REQUEST;          // 任务的类型
-task->dst_thread_key = -1;                              // 随机选择一个 Worker 执行 Task
+task->dst_thread_key = -1;
 task->handler = [](Task* task) mutable {
     std::cout << "hello world" << std::endl;
 };
@@ -135,6 +134,41 @@ task->handler = [=](xrpc::Task* task) {
 // 用 Thread Model Task 包装 Timer Task
 // 这是因为 xrpc 框架要求提交 Timer Task 的线程必须属于 XRPC Thread Model 的线程
 thread_model->SubmitHandleTask(task);
+```
+
+通过为 xrpc 配置多个 ThreadModel 实例，可以初始化多个线程池，这样可以将任务运行的线程池进行分离，例如下述 yaml 文件提供了 `default_instance` 和 `test` 两个 ThreadModel 实例。
+
+```yaml
+global:
+  threadmodel:
+    default:
+      - instance_name: default_instance
+        io_handle_type: seperate
+        io_thread_num: 8
+        handle_thread_num: 10
+      - instance_name: test
+        io_handle_type: seperate
+        io_thread_num: 0
+        handle_thread_num: 1
+```
+
+可以在业务代码中获得指定实例的 ThreadModel，并提交 Task：
+
+```cpp
+xrpc::ThreadModelType threadmodel_type = xrpc::ThreadModelType::DEFAULT;
+std::string threadmodel_instance_name = "test";
+auto thread_model = ThreadModelManager::GetInstance()->GetThreadModel(threadmodel_type, threadmodel_instance_name);
+
+// 构建一个任务
+xrpc::Task* task = new xrpc::Task();
+task->group_id = thread_model->GetThreadModelId();      // 线程模型 ID
+task->task_type = TaskType::TRANSPORT_REQUEST;          // 任务的类型
+task->dst_thread_key = -1;
+task->handler = [](Task* task) mutable {
+    std::cout << "hello world" << std::endl;
+};
+
+xrpc::TaskResult result = thread_model->SubmitHandleTask(task);
 ```
 
 ## UML Class Diagram
