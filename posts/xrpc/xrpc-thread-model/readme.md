@@ -1,8 +1,8 @@
-# XRPC Thread Model
+# Xrpc Thread Model
 
 <!-- TOC -->
 
-- [XRPC Thread Model](#xrpc-thread-model)
+- [Xrpc Thread Model](#xrpc-thread-model)
     - [Overview](#overview)
     - [Quick Start](#quick-start)
     - [UML Class Diagram](#uml-class-diagram)
