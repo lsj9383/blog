@@ -30,6 +30,17 @@
 
 ## UML Class Diagram
 
+在网络模型中，以下角色是重要且会经常碰到的：
+
+- Socket
+- EventHandler
+  - Acceptor
+  - Connection
+- EventHandleManager
+- ReactorImpl
+- EPollPoller
+- Epoll
+
 ```mermaid
 classDiagram
 
@@ -190,16 +201,189 @@ classDiagram
 
 ### TcpConnection Connect
 
+应用使用 TcpConnection 建立连接的流程如下：
+
 ```mermaid
 sequenceDiagram
 autonumber
+
+participant user as User
+participant tcp_conn as TcpConnection
+participant socket as Socket
+participant conn_handler as Connection Handler
+participant reactor as Reactor Impl
+participant event_handler_manager as Event Handler Manager
+
+user ->> tcp_conn: DoConnect
+tcp_conn ->> socket: Socket.Connect
+alt Connect 失败
+  tcp_conn ->> socket: Socket.Close
+  tcp_conn -->> user: 返回失败
+end
+tcp_conn ->> tcp_conn: 设置读写事件
+tcp_conn ->> reactor: AddEventHandler
+reactor ->> event_handler_manager: 将 TcpConnection(EventHandler) 添加至 Manager
+event_handler_manager -->> reactor: 成功
+reactor -->> tcp_conn: 成功
+
+alt 连接未完成(errno == EINPROGRESS)
+  tcp_conn ->> tcp_conn: 设置连接状态为 kConnecting
+  tcp_conn -->> user: 返回成功
+end
+
+tcp_conn ->> conn_handler: ConnectionEstablished 通知应用层连接建立完成
+conn_handler --> tcp_conn: 完成
+tcp_conn ->> tcp_conn: 设置连接状态为 kConnected
 ```
+
+很明显，DoConnect 返回时连接可能并未建立完成，此时会在连接写事件触发时重新去判断连接是否建立，请参考 [TcpConnection Write Event](#tcpconnection-write-event)。
 
 ### TcpConnection Send
 
+应用使用 TcpConnection 发送数据时，通常而言 TcpConnection 并非会立即进行数据的发送，而是在队列中进行缓存，在触发 Write Event 时才会将队列中的数据进行发送。对于 Write Event 的处理请参考 [TcpConnection Write Event](#tcpconnection-write-event)。
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant user as User
+participant tcp_conn as TcpConnection
+participant reactor as Reactor Impl
+participant epoll as Epoll
+
+user ->> tcp_conn: Send 发送数据
+
+alt state_ == kConnecting
+  tcp_conn ->> tcp_conn: HandleWriteEvent 主动触发写事件处理
+end
+
+alt 发送数据队列满
+  tcp_conn ->> tcp_conn: HandleWriteEvent 主动触发写事件处理
+end
+
+alt need_direct_write_ == true 可以直接发送数据
+  tcp_conn ->> reactor: ModEventHandler
+  reactor ->> epoll: 通过 EPOLL_CTL_MOD 修改为 EPOLLOUT，以此触发 WriteEvent
+  epoll -->> reactor: 完成
+  reactor -->> tcp_conn: 完成
+  tcp_conn ->> tcp_conn: need_direct_write_ = false
+end
+
+tcp_conn -->> user: 完成
+```
+
+对于 need_direct_write_，通常是建立连接后或者是 WriteEvent 触发后就会设置为 true，这意味着 Send 会通过设置 fd 为 EPOLLOUT 来触发 HandleEvent。
+
 ### TcpConnection Read Event
 
+Reactor 在得到 TCP 读事件时，会使用 TcpConnection 对其进行处理，具体逻辑如下：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant reactor as Reactor Impl
+participant event_handler_manager as Event Handler Manager
+participant tcp_conn as TcpConnection
+participant io_handler as IO Handler
+participant conn_handler as Connection Handler
+
+loop reactor 的 epoll 循环
+  reactor ->> reactor: 等待接收事件
+  reactor ->> reactor: 获取到读事件，以及事件 data
+
+  reactor ->> event_handler_manager: 使用事件 data 获取 EventHandler
+  event_handler_manager -->> reactor: 返回 EventHandler(TcpConnection)
+
+  reactor ->> tcp_conn: HandleEvent 处理事件(实际会调用 HandleReadEvent)
+
+  alt 握手未完成
+    tcp_conn ->> io_handler: Handshake
+    io_handler -->> tcp_conn: 返回
+    alt 握手仍未完成
+      tcp_conn -->> reactor: 返回（等待下次重新触发）
+    else 握手完成
+      tcp_conn ->> tcp_conn: 设置状态为握手完成
+    end
+  end
+
+  loop socket 仍有数据
+    tcp_conn ->> io_handler: Read 读取数据
+  end
+
+  tcp_conn ->> conn_handler: MessageCheck 检查并解析数据
+  alt 数据还不是完整的包
+    tcp_conn -->> reactor: 完成并等待下次接收数据
+  end
+
+  tcp_conn ->> conn_handler: MessageHandle 进行消息处理
+  conn_handler -->> tcp_conn: 处理完成
+
+  tcp_conn ->> conn_handler: ConnectionTimeUpdate 连接保活通知
+  conn_handler -->> tcp_conn: 完成
+  
+  tcp_conn -->> reactor: 完成
+end
+```
+
 ### TcpConnection Write Event
+
+Reactor 将 Write Event 交给 TcpConnection(EventHandler) 进行处理：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant reactor as Reactor Impl
+participant event_handler_manager as Event Handler Manager
+participant tcp_conn as TcpConnection
+participant io_handler as IO Handler
+participant conn_handler as Connection Handler
+
+loop reactor 的 epoll 循环
+
+  reactor ->> reactor: 等待接收事件
+  reactor ->> reactor: 获取到写事件，以及事件 data
+  reactor ->> event_handler_manager: 使用事件 data 获取 EventHandler
+  event_handler_manager -->> reactor: 返回 EventHandler(TcpConnection)
+
+  reactor ->> tcp_conn: HandleEvent 处理事件(实际会调用 HandleWriteEvent)
+
+  alt 连接处于 kConnecting 状态
+    tcp_conn ->> tcp_conn: JudgeConnected 判断连接状态
+    alt 连接未完成
+      tcp_conn ->> tcp_conn: HandleClose（已经触发了 Write 事件了连接却无效，连接属于异常情况）
+      tcp_conn -->> reactor: 返回
+    end
+    
+    tcp_conn ->> conn_handler: ConnectionEstablished 通知应用层连接建立完成
+    conn_handler --> tcp_conn: 完成
+    tcp_conn ->> tcp_conn: 设置连接状态为 kConnected
+    tcp_conn ->> conn_handler: NotifySendMessage 通知应用层连接建立完成后进行消息发送的接口
+    conn_handler --> tcp_conn: 完成
+  end
+
+  alt 握手未完成
+    tcp_conn ->> io_handler: Handshake
+    io_handler -->> tcp_conn: 返回
+    alt 握手仍未完成
+      tcp_conn -->> reactor: 返回（等待下次重新触发）
+    else 握手完成
+      tcp_conn ->> tcp_conn: 设置状态为握手完成
+    end
+  end
+
+  loop !io_msgs.empty()
+    tcp_conn ->> io_handler: 发送数据 Writev
+    io_handler -->> tcp_conn: 响应
+  end
+
+  tcp_conn ->> conn_handler: ConnectionTimeUpdate 连接保活通知
+  conn_handler -->> tcp_conn: 完成
+
+  tcp_conn -->> reactor: 完成
+end
+```
 
 ## EventHandler
 
