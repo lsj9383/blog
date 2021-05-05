@@ -23,11 +23,15 @@
     - [Poller](#poller)
     - [Epoll](#epoll)
     - [Options](#options)
-    - [Connection::Options](#connectionoptions)
+        - [Connection::Options](#connectionoptions)
 
 <!-- /TOC -->
 
 ## Overview
+
+Xrpc Network Model 描述了 Xrpc 网络事件的处理方式、网络事件的抽象方式、网络模型和应用层的交互方式。
+
+Xrpc Network Model 是运行在 Thread Model 的 IO Thread 上的，所有的网络事件都会向 IO Thread 中的 Reactor 进行事件注册，并由这些 Reactor 进行事件检测和调用。在 Linux 中 Xrpc Reactor 本质上是对 Epoll 处理的封装。
 
 ## Quick Start
 
@@ -1179,23 +1183,53 @@ EventHandler *EventHandlerManager::GetEventHandler(uint64_t event_handler_id) {
 
 ## Reactor
 
+Reactor 提供一个大循环持续监听触发的事件，并对事件进行处理：
+
 ```cpp
+void ReactorImpl::Run() {
+  // 事件处理逻辑
+  Poller::EventHandleFunction event_handler_function = [this](int recv_events, uint64_t event_data) {
+    EventHandler* event_handler = GetEventHandler(event_data);
+    if (event_handler) {
+      event_handler->HandleEvent(recv_events);
+    }
+  };
+
+  while (!terminate_) {
+    // timeout == 5ms
+    options_.poller->Dispatch(Poller::kPollerTimeout, event_handler_function);
+    // ...
+  }
+  // ...
+}
+```
+
+上述 `options_.poller->Dispatch` 本质上是对 Epoll 的调用，请参考 [Poller](#poller) 和 [Epoll](#epoll)。
+
+Reactor 提供了对 Event Handler 控制的方法，包括生成 Id，添加事件等：
+
+```cpp
+// 得到一个新的 Event Handler Id
 uint64_t ReactorImpl::GenEventHandlerId() { return event_handler_manager_->GenEventHandlerId(); }
 
+// 通过 Event Handler Id 获得对应的 Event Handler
 EventHandler* ReactorImpl::GetEventHandler(uint64_t event_id) {
   return event_handler_manager_->GetEventHandler(event_id);
 }
 
+// 将 Event Handler 的事件添加至 Epoll
 void ReactorImpl::AddEventHandler(EventHandler* event_handler) {
   event_handler_manager_->AddEventHandler(event_handler);
 
   options_.poller->UpdateEvent(event_handler);
 }
 
+// 将 Event Handler 的事件设置到 Epoll 中
 void ReactorImpl::ModEventHandler(EventHandler* event_handler) {
   options_.poller->UpdateEvent(event_handler);
 }
 
+// 将 Event Handler 的事件从 Epoll 中移除
 void ReactorImpl::DelEventHandler(EventHandler* event_handler) {
   event_handler_manager_->DelEventHandler(event_handler);
 
@@ -1303,7 +1337,7 @@ void Epoll::Ctrl(int fd, uint64_t data, uint32_t events, int op) {
 
 ## Options
 
-## Connection::Options
+### Connection::Options
 
 ```cpp
 class Connection : public EventHandler {
