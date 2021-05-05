@@ -24,6 +24,7 @@
     - [Epoll](#epoll)
     - [Options](#options)
         - [Connection::Options](#connectionoptions)
+        - [DefaultConnection::Options](#defaultconnectionoptions)
 
 <!-- /TOC -->
 
@@ -1239,6 +1240,52 @@ void ReactorImpl::DelEventHandler(EventHandler* event_handler) {
 
 ## Poller
 
+EpollPoller 是对 Epoll 使用的封装，EpollPoller 可以进行 Epoll 的等待，并将触发的事件逐一回调处理：
+
+```cpp
+void EPollPoller::Dispatch(int timeout, const EventHandleFunction& func) {
+  int event_num = epoll_.Wait(timeout);
+
+  for (int i = 0; i < event_num; ++i) {
+    const epoll_event& ev = epoll_.Get(i);
+    int recv_events = EventToEventType(ev.events);
+    if (recv_events) {
+      func(recv_events, ev.data.u64);
+    }
+  }
+}
+```
+
+Reactor 通过 `EpollPoller::UpdateEvent` 接口向 Epoll 注册事件：
+
+```cpp
+// EpollPoller 更新 Handler 的逻辑
+// event_handler->GetFd() 获得文件描述符
+// event_handler->GetEventData() 获得 EventHandler 的 Id
+void EPollPoller::UpdateEvent(EventHandler* event_handler) {
+  EventHandler::EventHandlerState state = event_handler->GetState();
+  if (state == EventHandler::EventHandlerState::CREATE) {
+    uint32_t events = EventTypeToEvent(event_handler->GetSetEvents());
+
+    epoll_.Add(event_handler->GetFd(), event_handler->GetEventData(), events);
+
+    event_handler->SetState(EventHandler::EventHandlerState::MOD);
+  } else {
+    if (event_handler->HasSetEvent()) {
+      uint32_t events = EventTypeToEvent(event_handler->GetSetEvents());
+
+      epoll_.Mod(event_handler->GetFd(), event_handler->GetEventData(), events);
+    } else {
+      epoll_.Del(event_handler->GetFd(), event_handler->GetEventData(), 0);
+
+      event_handler->SetState(EventHandler::EventHandlerState::CREATE);
+    }
+  }
+}
+```
+
+Event Handler 的 EventType 和 Epoll 的 Event 之间的转换是在 EpollPoller 中的：
+
 ```cpp
 uint32_t EPollPoller::EventTypeToEvent(int event_type) {
   uint32_t events = 0;
@@ -1277,33 +1324,17 @@ int EPollPoller::EventToEventType(uint32_t events) {
 }
 ```
 
+## Epoll
+
+Xrpc 的 Epoll 对象是对 Linux epoll 使用的封装，使用 `Wait` 方法进行 epoll 等待：
+
 ```cpp
-// EpollPoller 更新 Handler 的逻辑
-// event_handler->GetFd() 获得文件描述符
-// event_handler->GetEventData() 获得 EventHandler 的 Id
-void EPollPoller::UpdateEvent(EventHandler* event_handler) {
-  EventHandler::EventHandlerState state = event_handler->GetState();
-  if (state == EventHandler::EventHandlerState::CREATE) {
-    uint32_t events = EventTypeToEvent(event_handler->GetSetEvents());
-
-    epoll_.Add(event_handler->GetFd(), event_handler->GetEventData(), events);
-
-    event_handler->SetState(EventHandler::EventHandlerState::MOD);
-  } else {
-    if (event_handler->HasSetEvent()) {
-      uint32_t events = EventTypeToEvent(event_handler->GetSetEvents());
-
-      epoll_.Mod(event_handler->GetFd(), event_handler->GetEventData(), events);
-    } else {
-      epoll_.Del(event_handler->GetFd(), event_handler->GetEventData(), 0);
-
-      event_handler->SetState(EventHandler::EventHandlerState::CREATE);
-    }
-  }
+int Epoll::Wait(int millsecond) {
+  return epoll_wait(epoll_fd_, events_, max_events_ + 1, millsecond);
 }
 ```
 
-## Epoll
+Xrpc Epoll 对象提供了 Linux epoll 事件的控制：
 
 ```cpp
 void Epoll::Add(int fd, uint64_t data, uint32_t event) {
@@ -1316,10 +1347,6 @@ void Epoll::Mod(int fd, uint64_t data, uint32_t event) {
 
 void Epoll::Del(int fd, uint64_t data, uint32_t event) {
   Ctrl(fd, data, event, EPOLL_CTL_DEL);
-}
-
-int Epoll::Wait(int millsecond) {
-  return epoll_wait(epoll_fd_, events_, max_events_ + 1, millsecond);
 }
 
 void Epoll::Ctrl(int fd, uint64_t data, uint32_t events, int op) {
@@ -1336,6 +1363,8 @@ void Epoll::Ctrl(int fd, uint64_t data, uint32_t events, int op) {
 ```
 
 ## Options
+
+Network Model 牵涉到的很多对象都有 Options，这些 Options 中包含了一些重要信息和对象，这里对 Options 进行了列举和梳理：
 
 ### Connection::Options
 
@@ -1375,6 +1404,26 @@ class Connection : public EventHandler {
 
     // 连接上流消息处理器
     StreamHandlerPtr stream_handler{nullptr};
+  };
+};
+```
+
+### DefaultConnection::Options
+
+```cpp
+class DefaultConnection : public Connection {
+ public:
+  struct Options {
+    Connection::Options options;
+
+    // // 此Connection的连接id，上层分配
+    // uint64_t conn_id;
+
+    // 接收数据时，每次分配内存buffer的大小
+    uint32_t recv_buffer_size = 8192;
+
+    // 合并发送数据的大小
+    uint32_t merge_send_data_size = 8192;
   };
 };
 ```
