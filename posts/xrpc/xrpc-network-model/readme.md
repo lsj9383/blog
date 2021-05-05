@@ -5,6 +5,8 @@
 - [Xrpc Network Model](#xrpc-network-model)
     - [Overview](#overview)
     - [Quick Start](#quick-start)
+        - [Client Dmoe](#client-dmoe)
+        - [Server Demo](#server-demo)
     - [UML Class Diagram](#uml-class-diagram)
     - [Sequence Diagram](#sequence-diagram)
         - [TcpConnection Connect](#tcpconnection-connect)
@@ -29,7 +31,15 @@
 
 ## Quick Start
 
-我们通过一个使用 Xrpc 的 Network Model 的接口来构造一个 HTTP 请求和响应来理解 Xrpc 的工作流程。
+我们通过两个示例来快速理解 Xrpc 的网络模型以及其对外暴露的接口。在实际 Xrpc 网络编程中，往往并不会直接使用网络模型的接口，而是使用 Xrpc 封装的 Transport 接口。
+
+### Client Dmoe
+
+我们通过一个使用 Xrpc 的 Network Model 的接口来构造一个 HTTP 请求和响应来理解 Xrpc Client 的工作流程。
+
+### Server Demo
+
+我们再通过 Xrpc 的 Network Model 构造一个 Echo Demo Server 来理解 Xrpc Serve 的工作流程。
 
 ## UML Class Diagram
 
