@@ -11,10 +11,11 @@
         - [TcpConnection Send](#tcpconnection-send)
         - [TcpConnection Read Event](#tcpconnection-read-event)
         - [TcpConnection Write Event](#tcpconnection-write-event)
+        - [TcpAcceptor Read Event](#tcpacceptor-read-event)
     - [EventHandler](#eventhandler)
         - [Acceptor](#acceptor)
         - [Connection](#connection)
-        - [Connection Initial](#connection-initial)
+        - [Event Handler Initial](#event-handler-initial)
     - [EventHandlerManager](#eventhandlermanager)
     - [Reactor](#reactor)
     - [Poller](#poller)
@@ -27,6 +28,8 @@
 ## Overview
 
 ## Quick Start
+
+我们通过一个使用 Xrpc 的 Network Model 的接口来构造一个 HTTP 请求和响应来理解 Xrpc 的工作流程。
 
 ## UML Class Diagram
 
@@ -382,6 +385,39 @@ loop reactor 的 epoll 循环
   conn_handler -->> tcp_conn: 完成
 
   tcp_conn -->> reactor: 完成
+end
+```
+
+### TcpAcceptor Read Event
+
+TcpAcceptor 用于监听 Socket，其 Read Event 的处理本质上就是 Accept 并构造一个 TCP Socket 返回给应用层，其时序图：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant reactor as Reactor Impl
+participant event_handler_manager as Event Handler Manager
+participant tcp_acceptor as TcpAcceptor
+participant socket as Socket
+participant accept_handler as Accept Handler
+
+loop reactor 的 epoll 循环
+
+  reactor ->> reactor: 等待接收事件
+  reactor ->> reactor: 获取到写事件，以及事件 data
+  reactor ->> event_handler_manager: 使用事件 data 获取 EventHandler
+  event_handler_manager -->> reactor: 返回 EventHandler(TcpAcceptor)
+
+  reactor ->> tcp_acceptor: HandleEvent 处理事件(实际会调用 HandleWriteEvent)
+  loop 仍有需要 Accept 的连接
+    tcp_acceptor ->> socket: Accept 获得连接 fd
+    socket -->> tcp_acceptor: 返回连接 fd
+    tcp_acceptor ->> tcp_acceptor: 构造 TCP Socket
+    tcp_acceptor ->> accept_handler: accept_handler(new_socket_info) 通知应用层获得新的 TCP Socket
+    accept_handler -->> tcp_acceptor: 完成
+  end
+  tcp_acceptor -->> reactor: 完成
 end
 ```
 
@@ -900,9 +936,163 @@ bool TcpConnection::PreCheckOnWrite() {
 }
 ```
 
-### Connection Initial
+### Event Handler Initial
 
-TcpAcceptor 和 TcpConnection 是在什么时候进行初始化的呢？
+在 Xrpc 的应用中，TcpAcceptor 和 TcpConnection 是在什么时候进行初始化的呢？
+
+对于 Xrpc 作为 Client 主动建立连接和 Xrpc 作为 Server 接收连接的处理是不太一样的：
+
+- 对于 Xrpc Client 只需要对 TcpConnection 进行初始化。
+- 对于 Xrpc Server 需要对 TcpAcceptor 进行初始化，也要在连接建立后对 TcpConnection 进行初始化。
+
+用户其实很少直接使用 Network Model 提供的 TcpConnection 和 TcpAcceptor 进行编程，而是使用 Xrpc 的 Transport 系列的组件，Transport 封装了 Network Model 的相关接口，以便用户可以更方便的使用网络功能。对于 Xrpc 的 Transport 的细节请参考 [Xrpc Transport](../xrpc-transport/readme.md)，这里仅仅介绍 Xrpc Transport 是如何初始化 TcpAcceptor 和 TcpConnection 的。
+
+在 Xrpc Client 中抽象出了 Connector 类，该类用于封装对于连接的创建、复用和管理，Xrpc Client 有两种 Connector：
+
+- ConnPoolConnector，这是一种连接池方式和目标进行连接和通信 Connector
+- ConnComplexConnector，这是一种连接复用方式和目标进行连接和通信的 Connector
+
+无论是何种 Connector，均使用 `Connector::CreateTcpConnection` 构建 TcpConnection：
+
+```cpp
+DefaultConnection* Connector::CreateTcpConnection(uint64_t conn_id) {
+  // 初始化 TCP Connection 的配置
+  DefaultConnection* conn = nullptr;
+  DefaultConnection::Options options = MakeConnectionOption(conn_id);
+
+  // 构造 TCP Socket 以及进行 IO 处理的 IO Handler
+  options.options.socket = Socket::CreateTcpSocket(options_.peer_addr.IsIpv6());
+  options.options.io_handler = IoHandlerFactory::GetInstance()->Create(
+      options.options.socket.GetFd(), *(options_.trans_info));
+
+  // 构造 TcpConnection 并建立连接
+  conn = new TcpConnection(options);
+  conn->DoConnect();
+  return conn;
+}
+
+
+DefaultConnection::Options Connector::MakeConnectionOption(uint64_t conn_id) {
+  // 构造连接参数
+  DefaultConnection::Options options;
+
+  options.recv_buffer_size = options_.trans_info->recv_buffer_size;
+  options.options.max_packet_size = options_.trans_info->max_packet_size;
+  options.merge_send_data_size = options_.trans_info->merge_send_data_size;
+  // 初始化 Event Handler ID，本质上是调用了 Event Handler Manager 的方法得到 ID
+  options.options.event_handler_id = options_.io_model->GetReactor()->GenEventHandlerId();
+  options.options.reactor = options_.io_model->GetReactor();
+  options.options.type = options_.trans_info->conn_type;
+  options.options.conn_id = conn_id;
+  options.options.client = true;
+
+  ConnectionInfo connection_info;
+  connection_info.remote_addr = options_.peer_addr;
+  options.options.conn_info = std::move(connection_info);
+
+  // 设置连接相关事件触发时的回调
+  auto* conn_handler = new FutureConnectionHandler(options_.trans_info);
+
+  // TCP Connection 清理
+  conn_handler->SetCleanFunc([this](const ConnectionPtr& conn) {
+    this->ConnectionCleanFunction(conn);
+  });
+
+  // TCP Connection 对一个完整的数据包进行处理
+  conn_handler->SetMsgHandleFunc([this](const ConnectionPtr& conn, std::deque<std::any>& data) {
+    return this->MessageHandleFunction(conn, data);
+  });
+
+  // TCP Connection 建立 并且有缓存的发送数据
+  conn_handler->SetNotifyMsgSendFunc([this](const ConnectionPtr& conn) {
+    return this->NotifySendMsgFunction(conn);
+  });
+
+  // TCP Connection 保活事件
+  conn_handler->SetTimeUpdateFunc([this](const ConnectionPtr& conn) {
+    this->ActiveTimeUpdate(conn);
+  });
+
+  // Pipline 处理事件
+  conn_handler->SetPipelineCountGetFunc([this](const ConnectionPtr conn) {
+    return this->GetPipelineCount(conn);
+  });
+
+  // 其他的事件由 FutureConnectionHandler 实现
+  // FutureConnectionHandler 回调实现又依赖于 options_.trans_info
+
+  options.options.conn_handler = conn_handler;
+  return options;
+}
+```
+
+对于 Xrpc Server 使用了 `BindAdapter` 封装了 TcpAcceptor 的相关操作，通过 `BindAdapter::BindTcp` 对 TcpAcceptor 进行了初始化以及设置了收到新连接的处理逻辑：
+
+```cpp
+void BindAdapter::BindTcp() {
+  auto ip = options_.bind_info.ip;
+  auto port = options_.bind_info.port;
+  auto ip_type = options_.bind_info.is_ipv6 ? NetworkAddress::IpType::ipv6 : NetworkAddress::IpType::ipv4;
+
+  NetworkAddress addr(ip, port, ip_type);
+
+  Acceptor::Options options;
+  options.event_handler_id = options_.io_model->GetReactor()->GenEventHandlerId();
+  options.reactor = options_.io_model->GetReactor();
+  options.tcp_addr = addr;
+  // 收到新连接后将连接信息提交给 ServerTransport 以构建新的 TcpConnection
+  options.accept_handler = [this](const AcceptConnectionInfo& connection_info) {
+    return this->options_.server_transport->AcceptConnection(connection_info);
+  };
+  acceptor_ = std::make_shared<TcpAcceptor>(options);
+}
+```
+
+在 Xrpc Server 接收到一个新连接后，会将连接信息交给 ServerTransport 以构建 TcpConnection，后续就可以开始真正的数据传输了：
+
+```cpp
+bool ServerTransportImpl::AcceptConnection(const AcceptConnectionInfo& connection_info) {
+  // 找到一个bind_adapter和对应的reactor
+  index = connection_info.socket.GetFd() % bind_adapters_.size();
+  auto* bind_adapter = bind_adapters_[index];
+  auto* reactor = bind_adapter->GetOptions().io_model->GetReactor();
+
+  reactor->SubmitTask([reactor, bind_adapter, connection_info] {
+    uint64_t event_handler_id = reactor->GenEventHandlerId();
+    uint64_t conn_id = bind_adapter->GetConnManager().GenConnectionId();
+    const auto& bind_info = bind_adapter->GetOptions().bind_info;
+
+    Connection::Options options;
+    options.event_handler_id = event_handler_id;
+    options.conn_id = conn_id;
+    options.reactor = bind_adapter->GetOptions().io_model->GetReactor();
+    options.socket = connection_info.socket;
+    options.conn_info = connection_info.conn_info;
+    options.max_packet_size = bind_info.max_packet_size;
+    options.conn_handler = new DefaultConnectionHandler(bind_adapter);
+
+    DefaultConnection::Options default_connection_options;
+    default_connection_options.options.type = ConnectionType::TCP_LONG;
+    default_connection_options.recv_buffer_size = bind_info.recv_buffer_size;
+    default_connection_options.merge_send_data_size = bind_info.merge_send_data_size;
+
+    options.io_handler =
+        IoHandlerFactory::GetInstance()->Create(connection_info.socket.GetFd(), bind_info);
+
+    default_connection_options.options = options;
+
+    auto* conn = new TcpConnection(default_connection_options);
+    bind_adapter->GetConnManager().AddConnection(conn);
+    auto& connections_active_time = bind_adapter->GetConnectionActiveTime();
+    connections_active_time[conn->GetConnId()] = xrpc::TimeProvider::GetNowMs();
+
+    // 添加读写事件, 回调应用层通知请求建立成功
+    conn->Established();
+  });
+
+  return true;
+}
+```
 
 ## EventHandlerManager
 
