@@ -92,6 +92,7 @@ class TestClientConnectionHandler : public xrpc::ConnectionHandler {
   int MessageCheck(const xrpc::ConnectionPtr& conn, xrpc::NoncontiguousBuffer& in, std::deque<std::any>& out) override {
     std::cout << "MessageCheck data:" << std::endl;
     out.push_back(in);
+    in.Clear();
     return xrpc::PacketChecker::PACKET_FULL;
   }
 
@@ -253,6 +254,7 @@ class TestServerConnectionHandler : public xrpc::ConnectionHandler {
   int MessageCheck(const xrpc::ConnectionPtr& conn, xrpc::NoncontiguousBuffer& in, std::deque<std::any>& out) override {
     std::cout << "MessageCheck data:" << std::endl;
     out.push_back(in);
+    in.Clear();
     return xrpc::PacketChecker::PACKET_FULL;
   }
 
@@ -273,9 +275,6 @@ class TestServerConnectionHandler : public xrpc::ConnectionHandler {
       ++index;
 
       xrpc::IoMessage io_message;
-      io_message.ip = conn->GetPeerIp();
-      io_message.port = conn->GetPeerPort();
-      io_message.direct_send = true;
       io_message.buffer = std::move(buff);
       connection->Send(std::move(io_message));
     }
@@ -291,6 +290,10 @@ class TestServerConnectionHandler : public xrpc::ConnectionHandler {
   // 连接关闭完成后的回调，可能会对连接做一些清理、释放内存的工作
   void ConnectionClean(const xrpc::ConnectionPtr&) override {
     std::cout << "ConnectionClean" << std::endl;
+    // 清理掉连接
+    auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+    auto reactor = thread_model->GetIOThread(0)->GetIoModel()->GetReactor();
+    reactor->SubmitTask([conn] { delete conn; });
   }
 
   // 发送完数据调用
@@ -346,6 +349,28 @@ int main() {
   xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
 }
 ```
+
+启动 Server 后，可以使用 telnet 连接进行测试：
+
+```sh
+# 通过 telnet 连接
+$ telnet 127.0.0.1 8899
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+123
+123
+3333
+3333
+4213
+4213
+^]
+telnet> quit
+```
+
+**注意：**
+
+- telnet 关闭连接需要先通过 `ctrl + ]` 进入命令面板，再输入 quit 退出。
 
 ## UML Class Diagram
 
@@ -1661,6 +1686,15 @@ void Epoll::Ctrl(int fd, uint64_t data, uint32_t events, int op) {
 
   epoll_ctl(epoll_fd_, op, fd, &ev);
 }
+```
+
+很明显，Linux Epoll 使用水平触发还是边缘触发是由私有遍历 et_ 决定的，默认情况下，Xrpc 使用的 Epoll 为 边缘触发：
+
+```cpp
+class Epoll {
+ public:
+  explicit Epoll(uint32_t max_events = 10240, bool et = true);
+};
 ```
 
 ## Options
