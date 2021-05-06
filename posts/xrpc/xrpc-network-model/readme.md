@@ -17,7 +17,7 @@
     - [EventHandler](#eventhandler)
         - [Acceptor](#acceptor)
         - [Connection](#connection)
-        - [Event Handler Initial](#event-handler-initial)
+        - [EventHandler Initial](#eventhandler-initial)
     - [EventHandlerManager](#eventhandlermanager)
     - [Reactor](#reactor)
     - [Poller](#poller)
@@ -25,6 +25,7 @@
     - [Options](#options)
         - [Connection::Options](#connectionoptions)
         - [DefaultConnection::Options](#defaultconnectionoptions)
+        - [Acceptor::Options](#acceptoroptions)
 
 <!-- /TOC -->
 
@@ -42,9 +43,309 @@ Xrpc Network Model 是运行在 Thread Model 的 IO Thread 上的，所有的网
 
 我们通过一个使用 Xrpc 的 Network Model 的接口来构造一个 HTTP 请求和响应来理解 Xrpc Client 的工作流程。
 
+现假设存在一个 HTTP Server：
+
+```sh
+$ curl "http://127.0.0.1/ok" -H "Host:localhost" -v
+* About to connect() to 127.0.0.1 port 80 (#0)
+*   Trying 127.0.0.1...
+* Connected to 127.0.0.1 (127.0.0.1) port 80 (#0)
+> GET /ok HTTP/1.1
+> User-Agent: curl/7.29.0
+> Accept: */*
+> Host:localhost
+> 
+< HTTP/1.1 200 OK
+< Server: openresty/1.13.6.2
+< Date: Thu, 06 May 2021 06:41:04 GMT
+< Content-Type: text/plain
+< Content-Length: 2
+< Connection: keep-alive
+< 
+* Connection #0 to host 127.0.0.1 left intact
+ok
+```
+
+我们使用 Xrpc Client Network Model 构造 HTTP 请求试图拿到 HTTP Response：
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
+
+#include "xrpc/client/xrpc_client.h"
+#include "xrpc/runtime/iomodel/reactor/default/default_connection.h"
+#include "xrpc/runtime/iomodel/reactor/default/tcp_connection.h"
+#include "xrpc/common/config/xrpc_config.h"
+#include "xrpc/common/future/future_utility.h"
+#include "xrpc/common/xrpc_plugin.h"
+
+// Connection 相关事件回调
+class TestClientConnectionHandler : public xrpc::ConnectionHandler {
+  // 建立连接后回调该接口
+  void ConnectionEstablished(const xrpc::ConnectionPtr& conn) override {
+    std::cout << "ConnectionEstablished" << std::endl;
+  }
+
+  // 接收到数据包后都会通过 MessageCheck 检查数据的完整性
+  int MessageCheck(const xrpc::ConnectionPtr& conn, xrpc::NoncontiguousBuffer& in, std::deque<std::any>& out) override {
+    std::cout << "MessageCheck data:" << std::endl;
+    out.push_back(in);
+    return xrpc::PacketChecker::PACKET_FULL;
+  }
+
+  // 对接收数据的处理，通过 MessageCheck 确认收到完整的 PACKET 才会调用
+  bool MessageHandle(const xrpc::ConnectionPtr& conn, std::deque<std::any>& msg) override {
+    std::cout << "=========== MessageHandle ===========" << std::endl;
+    std::cout << "msg size:" << msg.size() << std::endl;
+    int index = 0;
+    auto it = msg.begin();
+    while (it != msg.end()) {
+      auto buff = std::any_cast<xrpc::NoncontiguousBuffer&&>(std::move(*it));
+      std::cout << "[" << index << "] "
+                << "TcpConnectionHandler Total buffer size:" << buff.ByteSize() << ", data:"
+                << std::endl << xrpc::FlattenSlow(buff) << std::endl;
+
+      ++it;
+      ++index;
+    }
+    std::cout << "=====================================" << std::endl;
+    return true;
+  }
+
+  // 连接关闭回调
+  void ConnectionClosed(const xrpc::ConnectionPtr& conn) override {
+    std::cout << "ConnectionClosed" << std::endl;
+    conn->DoClose(true);
+  }
+
+  // 连接关闭完成后的回调，可能会对连接做一些清理、释放内存的工作
+  void ConnectionClean(const xrpc::ConnectionPtr& conn) override {
+    std::cout << "ConnectionClean" << std::endl;
+
+    auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+    auto reactor = thread_model->GetIOThread(0)->GetIoModel()->GetReactor();
+    reactor->SubmitTask([conn] { delete conn; });
+  }
+
+  // 发送完数据调用
+  void MessageWriteDone(uint32_t seq_id) override {
+    std::cout << "MessageWriteDone seq_id: " << seq_id << std::endl;
+  }
+};
+
+void Test(xrpc::Reactor* reactor) {
+  // 配置选项
+  xrpc::DefaultConnection::Options options;
+  options.options.event_handler_id = reactor->GenEventHandlerId();
+  options.options.reactor = reactor;
+  // options.options.type = xrpc::ConnectionType::TCP_SHORT;
+  options.options.type = xrpc::ConnectionType::TCP_LONG;
+  options.options.conn_id = 1;
+  options.options.client = true;
+  options.options.socket = xrpc::Socket::CreateTcpSocket(false);
+  options.options.io_handler = new xrpc::DefaultIoHandler(options.options.socket.GetFd());
+
+  auto conn_handler = new TestClientConnectionHandler();
+  options.options.conn_handler = conn_handler;
+
+  // Remote
+  xrpc::ConnectionInfo connection_info;
+  connection_info.remote_addr = xrpc::NetworkAddress("127.0.0.1:80");
+  options.options.conn_info = std::move(connection_info);
+
+  // 等待连接完成
+  std::cout << "Connect ..." << std::endl;
+  auto conn = new xrpc::TcpConnection(options);
+  conn->DoConnect();
+  usleep(500000);
+
+  // 等待数据发送完成
+  std::cout << "Send ..." << std::endl;
+  std::string message;
+  message += "GET /ok HTTP/1.1\r\n";
+  message += "Host: localhost\r\n\r\n";
+  xrpc::IoMessage io_message;
+  io_message.buffer = xrpc::CreateBufferSlow(message.c_str(), message.size());
+  conn->Send(std::move(io_message));
+  usleep(500000);
+
+  // 等待连接关闭完成
+  // destory 为 true 时会在关闭完成时回调 ConnectionHandler::MessageHandle
+  std::cout << "Close ..." << std::endl;
+  static bool destory = true;
+  conn->DoClose(destory);
+  usleep(500000);
+}
+
+int main() {
+  xrpc::XrpcConfig::GetInstance()->Init("test_network_client.yaml");
+  xrpc::XrpcPlugin::GetInstance()->InitThreadModel();
+
+  auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+  Test(thread_model->GetIOThread(0)->GetIoModel()->GetReactor());
+
+  xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
+}
+```
+
+测试 Xrpc Client 请求：
+
+```sh
+$ ./bazel-bin/test/test/test_network_client --config=test_network_client.yaml 
+Parse Config:test_network_client.yaml
+create merge default thread model io_thread_num: 1
+==== threadmodel_id: 0
+==== iomodel_options.id: 0
+==== worker_thread_options.id: 0
+config path invalid: plugins 
+create seperate default thread model io_thread_num: 1 handle_thread_num: 1
+Connect ...
+ConnectionEstablished
+Send ...
+MessageWriteDone seq_id: 13
+MessageCheck
+=========== MessageHandle ===========
+msg size:1
+[0] TcpConnectionHandler Total buffer size:155, data:
+HTTP/1.1 200 OK
+Server: openresty/1.13.6.2
+Date: Thu, 06 May 2021 07:17:51 GMT
+Content-Type: text/plain
+Content-Length: 2
+Connection: keep-alive
+
+ok
+=====================================
+Close ...
+ConnectionClosed
+ConnectionClean
+```
+
 ### Server Demo
 
 我们再通过 Xrpc 的 Network Model 构造一个 Echo Demo Server 来理解 Xrpc Serve 的工作流程。
+
+Xrpc Server 需要借助 TcpAcceptor 进行连接监听，再借助 TcpConnection 进行连接传输。
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
+
+#include "xrpc/client/xrpc_client.h"
+#include "xrpc/runtime/iomodel/reactor/default/default_connection.h"
+#include "xrpc/runtime/iomodel/reactor/default/tcp_connection.h"
+#include "xrpc/common/config/xrpc_config.h"
+#include "xrpc/common/future/future_utility.h"
+#include "xrpc/common/xrpc_plugin.h"
+
+// Connection 相关事件回调
+class TestServerConnectionHandler : public xrpc::ConnectionHandler {
+  // 建立连接后回调该接口
+  void ConnectionEstablished(const xrpc::ConnectionPtr& conn) override {
+    std::cout << "ConnectionEstablished" << std::endl;
+  }
+
+  // 接收到数据包后都会通过 MessageCheck 检查数据的完整性
+  int MessageCheck(const xrpc::ConnectionPtr& conn, xrpc::NoncontiguousBuffer& in, std::deque<std::any>& out) override {
+    std::cout << "MessageCheck data:" << std::endl;
+    out.push_back(in);
+    return xrpc::PacketChecker::PACKET_FULL;
+  }
+
+  // 对接收数据的处理，通过 MessageCheck 确认收到完整的 PACKET 才会调用
+  bool MessageHandle(const xrpc::ConnectionPtr& conn, std::deque<std::any>& msg) override {
+    xrpc::Connection* connection = const_cast<xrpc::Connection*>(conn);
+    std::cout << "=========== MessageHandle ===========" << std::endl;
+    std::cout << "msg size:" << msg.size() << std::endl;
+    int index = 0;
+    auto it = msg.begin();
+    while (it != msg.end()) {
+      auto buff = std::any_cast<xrpc::NoncontiguousBuffer&&>(std::move(*it));
+      std::cout << "[" << index << "] "
+                << "TcpConnectionHandler Total buffer size:" << buff.ByteSize() << ", data:"
+                << std::endl << xrpc::FlattenSlow(buff) << std::endl;
+
+      ++it;
+      ++index;
+
+      xrpc::IoMessage io_message;
+      io_message.ip = conn->GetPeerIp();
+      io_message.port = conn->GetPeerPort();
+      io_message.direct_send = true;
+      io_message.buffer = std::move(buff);
+      connection->Send(std::move(io_message));
+    }
+    std::cout << "=====================================" << std::endl;
+    return true;
+  }
+
+  // 连接关闭回调
+  void ConnectionClosed(const xrpc::ConnectionPtr&) override {
+    std::cout << "ConnectionClosed" << std::endl;
+  }
+
+  // 连接关闭完成后的回调，可能会对连接做一些清理、释放内存的工作
+  void ConnectionClean(const xrpc::ConnectionPtr&) override {
+    std::cout << "ConnectionClean" << std::endl;
+  }
+
+  // 发送完数据调用
+  void MessageWriteDone(uint32_t seq_id) override {
+    std::cout << "MessageWriteDone seq_id: " << seq_id << std::endl;
+  }
+};
+
+void Test(xrpc::Reactor* reactor) {
+  int server_port = 8899;
+
+  xrpc::Acceptor::Options acceptor_options;
+  acceptor_options.event_handler_id = reactor->GenEventHandlerId();
+  acceptor_options.reactor = reactor;
+  acceptor_options.tcp_addr = xrpc::NetworkAddress(server_port, false);
+
+  // acceptor 接收到连接的处理
+  acceptor_options.accept_handler = [=] (const xrpc::AcceptConnectionInfo &connection_info) {
+    static uint64_t conn_id = 1;
+
+    xrpc::DefaultConnection::Options options;
+    options.options.event_handler_id = reactor->GenEventHandlerId();
+    options.options.reactor = reactor;
+    options.options.socket = connection_info.socket;
+    options.options.conn_info = connection_info.conn_info;
+    options.options.conn_handler = new TestServerConnectionHandler();
+    options.options.conn_id = conn_id++;
+    options.options.type = xrpc::ConnectionType::TCP_LONG;
+
+    auto conn = new xrpc::TcpConnection(options);
+    conn->Established();
+
+    return true;
+  };
+
+  // 构造 acceptor 开始监听
+  auto acceptor = std::make_shared<xrpc::TcpAcceptor>(acceptor_options);
+  acceptor->EnableListen();
+
+  // sleep
+  auto promise = xrpc::Promise<bool>();
+  auto fut = promise.get_future();
+  fut.Wait();
+}
+
+int main() {
+  xrpc::XrpcConfig::GetInstance()->Init("test_network_server.yaml");
+  xrpc::XrpcPlugin::GetInstance()->InitThreadModel();
+
+  auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+  Test(thread_model->GetIOThread(0)->GetIoModel()->GetReactor());
+
+  xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
+}
+```
 
 ## UML Class Diagram
 
@@ -951,7 +1252,7 @@ bool TcpConnection::PreCheckOnWrite() {
 }
 ```
 
-### Event Handler Initial
+### EventHandler Initial
 
 在 Xrpc 的应用中，TcpAcceptor 和 TcpConnection 是在什么时候进行初始化的呢？
 
@@ -1424,6 +1725,30 @@ class DefaultConnection : public Connection {
 
     // 合并发送数据的大小
     uint32_t merge_send_data_size = 8192;
+  };
+};
+```
+
+### Acceptor::Options
+
+```cpp
+class Acceptor : public EventHandler {
+ public:
+  struct Options {
+    // 此Acceptor的event_handler id
+    uint64_t event_handler_id;
+
+    // reactor
+    Reactor* reactor;
+
+    // 接收连接的方法
+    AcceptHandleFunction accept_handler;
+
+    // tcp监听地址
+    NetworkAddress tcp_addr;
+
+    // unix监听地址
+    UnixAddress unix_addr;
   };
 };
 ```
