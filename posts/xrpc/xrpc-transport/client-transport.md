@@ -11,6 +11,8 @@
         - [FutureTransport Initial](#futuretransport-initial)
         - [Async Send Impl](#async-send-impl)
         - [Sync Send Impl](#sync-send-impl)
+        - [SendOnly](#sendonly)
+        - [Backup Request](#backup-request)
     - [TransportAdapter](#transportadapter)
     - [Connector](#connector)
         - [ConnComplexConnector](#conncomplexconnector)
@@ -237,6 +239,99 @@ int FutureTransport::SendRecv(STransportReqMsg* req_msg, STransportRspMsg* rsp_m
   return 0;
 }
 ```
+
+### SendOnly
+
+FutureTransport 支持只发送数据而忽略对响应的等待，这可能在某些 UDP 的场景中较为常见。本质上是忽略对 promise 来实现：
+
+```cpp
+int FutureTransport::SendOnly(STransportReqMsg* msg) {
+  uint16_t id = SelectIOThread(trans_adapters_.size());
+  return SendRequest(msg, id, XrpcCallType::XRPC_ONEWAY_CALL);
+}
+```
+
+### Backup Request
+
+有时为了保证可用性和低时延，需要同时访问两路服务，哪个先返回就取哪个，Xrpc 的实现策略是：
+
+> 设置一个合理的resend time，当一个请求在resend time内超时或失败了，再发送第二个请求，然后取先返回的结果。这也是bRPC backup request的实现方式。
+
+在 FutureTransport 若信息配置了 Backup Request 则会使用该逻辑：
+
+```cpp
+Future<STransportRspMsg> FutureTransport::AsyncSendRecv(STransportReqMsg* msg) {
+  assert(msg->extend_info);
+  auto retry_info = msg->extend_info->client_extend_info.retry_info;
+  if (retry_info && retry_info->retry_policy == RetryInfo::RetryPolicy::BACKUP_REQUEST) {
+    return AsyncSendRecvForBackupRequest(msg);
+  }
+
+  // ...
+}
+
+// 下面的代码忽略了非常多的细节
+Future<STransportRspMsg> FutureTransport::AsyncSendRecvForBackupRequest(STransportReqMsg* msg) {
+  auto& client_extend_info = msg->extend_info->client_extend_info;
+
+  // 创建用于通知应用层的 promise/future
+  auto promise_ptr = new Promise<STransportRspMsg>();
+  auto fut = promise_ptr->get_future();
+
+  // 设置第一个请求的 promise 和回调
+  client_extend_info.promise = new Promise<STransportRspMsg>();
+  auto fut_first = client_extend_info.promise->get_future();
+
+  // 设置 backup promise 根据 First Promise 的情况判断 backup resend 是否发送
+  client_extend_info.backup_promise = new Promise<bool>();
+  auto backup_fut = client_extend_info.backup_promise->get_future();
+  backup_fut.Then([=](Future<bool>&& fut) mutable {
+
+    // 正常请求成功，直接返回
+    if (fut.is_ready()) {
+      // 触发应用层 future 回调
+      promise_ptr->SetValue(fut_first.GetValue());
+      return MakeReadyFuture<>();
+    }
+
+    // 失败，执行 resend 逻辑
+    std::vector<Future<STransportRspMsg>> vecs;
+    vecs.emplace_back(std::move(fut_first));  // fut_first直接放入
+
+    // 必须在同一个 io 线程中发送数据
+    uint16_t new_id = SelectTransportAdapter(msg, id);
+
+    // 从第一个 backup 地址开始，故 i = 1
+    auto& retry_info = msg->extend_info->client_extend_info.retry_info;
+    for (int i = 1; i < retry_info->back_addr.size(); i++) {
+      auto new_fut = AsyncSendRecvImp(msg, new_id)
+                         .Then([new_msg, retry_info](Future<STransportRspMsg>&& fut) {
+                           return std::move(fut);
+                         });
+
+      vecs.emplace_back(std::move(new_fut));
+    }
+
+    return WhenAnyWithoutException(vecs.begin(), vecs.end())
+        .Then([=](Future<size_t, std::tuple<STransportRspMsg>>&& fut) {
+          // 通知应用层 future 回调
+          if (fut.is_ready()) {
+            promise_ptr->SetValue(std::move(std::get<1>(result)));
+          } else {
+            promise_ptr->SetException(fut.GetException());
+          }
+          return MakeReadyFuture<>();
+        });
+  });
+
+  // 发起请求
+  uint16_t id = SelectTransportAdapter(msg);
+  int ret = SendRequest(msg, id, XrpcCallType::XRPC_UNARY_CALL);
+  return fut;
+}
+```
+
+在 Connector 中会负责通过设置 backup_promise 以发起重试，细节请参考 [Connector](#connector)。
 
 ## TransportAdapter
 
