@@ -41,6 +41,13 @@ FutureTransportOptions <-- FutureTransport
 FutureTransport --> TransportAdapter
 TransportAdapterOptions <-- TransportAdapter
 
+TransportAdapter --> ConnectorManager
+ConnectorManagerOptions <-- ConnectorManager
+
+ConnectorManager --> Connector
+Connector <|-- ConnPoolConnector
+Connector <|-- ConnComplexConnector
+
 class ClientTransport {
   +Name()
   +Type()
@@ -79,12 +86,36 @@ class FutureTransportOptions {
 class TransportAdapter {
   +TransportAdapterOptions options_
   +ConnectorManager connector_mgr_
-  +GetConnector(STransportReqMsg)
+  +GetConnector(STransportReqMsg) Connector
 }
 
 class TransportAdapterOptions {
   +IoModel io_model
   +TransInfo trans_info
+}
+
+class ConnectorManager {
+  ConnectorManagerOptions options_
+  map<std::string, Connector*> endpointId_to_connector_
+  +ConnectorManager(STransportReqMsg) Connector
+  +Destory() int
+}
+
+class ConnectorManagerOptions {
+  +IoModel io_model
+  +TransInfo trans_info
+}
+
+class Connector {
+  
+}
+
+class ConnPoolConnector {
+  
+}
+
+class ConnComplexConnector {
+  
 }
 ```
 
