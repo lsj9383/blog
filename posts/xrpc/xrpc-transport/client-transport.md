@@ -14,6 +14,7 @@
         - [SendOnly](#sendonly)
         - [Backup Request](#backup-request)
     - [TransportAdapter](#transportadapter)
+    - [ConnectorManager](#connectormanager)
     - [Connector](#connector)
         - [ConnComplexConnector](#conncomplexconnector)
         - [ConnPoolConnector](#connpoolconnector)
@@ -36,41 +37,54 @@
 classDiagram
 
 ClientTransport <|-- FutureTransport
-FutureTransport --> FutureTransportOptions
+FutureTransportOptions <-- FutureTransport
+FutureTransport --> TransportAdapter
+TransportAdapterOptions <-- TransportAdapter
 
 class ClientTransport {
-    +Name()
-    +Type()
-    +Init(params) int
-    +Start()
-    +Stop()
-    +Destory()
-    +AsyncSendRecv(STransportReqMsg) Future_STransportRspMsg
-    +SendRecv(STransportReqMsg, STransportRspMsg) int
-    +SendOnly(STransportReqMsg) int
-    +CreateStream(STransportReqMsg, StreamOptions)
+  +Name()
+  +Type()
+  +Init(params) int
+  +Start()
+  +Stop()
+  +Destory()
+  +AsyncSendRecv(STransportReqMsg) Future_STransportRspMsg
+  +SendRecv(STransportReqMsg, STransportRspMsg) int
+  +SendOnly(STransportReqMsg) int
+  +CreateStream(STransportReqMsg, StreamOptions)
 }
 
 class FutureTransport {
-    +vector<TransportAdapter*> trans_adapters_
-    +FutureTransportOptions options_
-    +Name()
-    +Version() string
-    +Init(params) int
-    +Start()
-    +Stop()
-    +Destory()
-    +Roll(io_thread_num) uint16_t
-    +SelectIOThread(io_thread_num)
-    +AsyncSendRecv(STransportReqMsg) Future_STransportRspMsg
-    +SendRecv(STransportReqMsg, STransportRspMsg) int
-    +SendOnly(STransportReqMsg) int
+  +vector<TransportAdapter*> trans_adapters_
+  +FutureTransportOptions options_
+  +Name()
+  +Version() string
+  +Init(params) int
+  +Start()
+  +Stop()
+  +Destory()
+  +Roll(io_thread_num) uint16_t
+  +SelectIOThread(io_thread_num)
+  +AsyncSendRecv(STransportReqMsg) Future_STransportRspMsg
+  +SendRecv(STransportReqMsg, STransportRspMsg) int
+  +SendOnly(STransportReqMsg) int
 }
 
 class FutureTransportOptions {
-    +ThreadModel* thread_model
-    +TransInfo trans_info
-    +string transport_name
+  +ThreadModel* thread_model
+  +TransInfo trans_info
+  +string transport_name
+}
+
+class TransportAdapter {
+  +TransportAdapterOptions options_
+  +ConnectorManager connector_mgr_
+  +GetConnector(STransportReqMsg)
+}
+
+class TransportAdapterOptions {
+  +IoModel io_model
+  +TransInfo trans_info
 }
 ```
 
@@ -335,9 +349,92 @@ Future<STransportRspMsg> FutureTransport::AsyncSendRecvForBackupRequest(STranspo
 
 ## TransportAdapter
 
-每个 IO 线程都有独立的 TransportAdapter，该对象封装了在线程上。
+TransportAdapter 封装了 ConnectorManager 的相关操作，每个 IO 线程都有独立的 TransportAdapter。
 
-很显然，有多少 IO 线程就有多少 TransportAdapter，该对象在 FutureTransport 中进行初始化，并且数组维护在 FutureTransport 中。数组下标和 IO 线程的线程 ID 是一一对应的（此线程 ID 并非 Linux 线程 ID，而是 Xrpc 为线程赋予的）。
+有多少 IO 线程就有多少 TransportAdapter，该对象在 FutureTransport 中进行初始化，并且数组维护在 FutureTransport 中。数组下标和 IO 线程的线程 ID 是一一对应的（此线程 ID 并非 Linux 线程 ID，而是 Xrpc 为线程赋予的）：
+
+```cpp
+int FutureTransport::Init(const std::any& params) {
+  Options options = std::any_cast<const FutureTransport::Options&>(params);
+  options_ = options;
+
+  // 根据 IO 线程数初始化 trans_adapters_
+  for (auto& io_thread : options_.thread_model->GetWorkerThreads(WorkerThread::Role::IO)) {
+    TransportAdapter::Options transport_adapter_option;
+    transport_adapter_option.io_model = io_thread->GetIoModel();
+    transport_adapter_option.trans_info = &(options_.trans_info);
+
+    trans_adapters_.emplace_back(new TransportAdapter(std::move(transport_adapter_option)));
+  }
+
+  return 0;
+}
+```
+
+显而易见，`trans_adapters[i]` 是第 i 个 IO 线程的 trans_adatpter。
+
+TransportAdapter 很简单，就是代理了 ConnectorManager 的相关动作，最核心的动作就是获得 Connector。
+
+```cpp
+Connector* TransportAdapter::GetConnector(STransportReqMsg* req_msg) {
+  return connector_mgr_->GetConnector(req_msg);
+}
+```
+
+TransportAdapterOptions 没啥用，Connector 都记录了这些信息的。
+
+## ConnectorManager
+
+ConnectorManager 用于管理 Connector，而 Connector 是真正负责封装网络操作的对象。
+
+ConnectorManager 会根据配置初始化连接复用类型的 Connector 或连接池类型的 Connector。
+
+ConnectorManager 建立的 Connector 池和远程端点关联在一起：
+
+```text
+endpointId_to_connector_[{conn_type}:{ip}:{port}] = Connector
+```
+
+ConnectorManager 中的 Connector 属于懒加载，在用到时才会去进行初始化：
+
+```cpp
+Connector* ConnectorManager::GetConnector(STransportReqMsg* req_msg) {
+  size_t len = 64;
+  std::string endpointId = Foramt("{type}:{ip}:{port}",
+                                  options_.trans_info->conn_type,
+                                  req_msg->basic_info->addr.ip,
+                                  req_msg->basic_info->addr.port);
+
+  // Connector 已经存在，直接返回并使用
+  auto it = endpointId_to_connector_.find(endpointId);
+  if (it != endpointId_to_connector_.end()) {
+    return it->second;
+  }
+
+  // 指定是连接复用还是连接池模式,创建对应连接模式的Connector
+  Connector::Options connector_options;
+  connector_options.io_model = options_.io_model;
+  connector_options.trans_info = options_.trans_info;
+  connector_options.peer_addr = NetworkAddress(std::string_view(req_msg->basic_info->addr.ip),
+                                               req_msg->basic_info->addr.port,
+                                               NetworkAddress::IpType::ipv4);
+
+  Connector* newConnector = nullptr;
+  if (connector_options.trans_info->conn_type == ConnectionType::UDP) {
+    // UDP
+    newConnector = new UdpConnector(connector_options);
+  } else if (options_.trans_info->is_complex_conn) {
+    // TCP 连接复用模式
+    newConnector = new ConnComplexConnector(connector_options);
+  } else {
+    // TCP 连接池模式
+    newConnector = new ConnPoolConnector(connector_options);
+  }
+
+  endpointId_to_connector_[endpointId] = newConnector;
+  return newConnector;
+}
+```
 
 ## Connector
 
