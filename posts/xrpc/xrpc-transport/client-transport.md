@@ -95,8 +95,8 @@ class TransportAdapterOptions {
 }
 
 class ConnectorManager {
-  ConnectorManagerOptions options_
-  map<std::string, Connector*> endpointId_to_connector_
+  +ConnectorManagerOptions options_
+  +map<std::string, Connector*> endpointId_to_connector_
   +ConnectorManager(STransportReqMsg) Connector
   +Destory() int
 }
@@ -107,7 +107,29 @@ class ConnectorManagerOptions {
 }
 
 class Connector {
-  
+  +ConnectorOptions options_
+  +uint64_t kConnectInterval
+  +size_t pending_queue_size_limit_
+  +size_t send_queue_size_limit_
+  +TimeoutQueue send_req_timeout_queue_
+  +TimeoutQueue pending_req_timeout_queue_
+  +vector<uint32_t> timer_index_vec_
+  +SendReqMsg(STransportReqMsg) int
+  +SendOnly(STransportReqMsg) int
+  +NotifySendMsgFunction(conn)
+  +MessageHandleFunction(conn, rsp_list)
+  +ConnectionCleanFunction(conn)
+  +CreateTcpConnection(conn_id)
+  +CreateUdpTransceiver(conn_id)
+  +ActiveTimeUpdate(conn)
+  +Destory() int
+  +PushToSendReqTimeoutQueue(STransportReqMsg)
+  +PopSendTimeoutQueue(request_id) STransportReqMsg
+  +PushToPendingTimeoutQueue(STransportReqMsg)
+  +PopPendingSendTask(STransportReqMsg) bool
+  +DispatchResponse(STransportReqMsg, STransportRspMsg)
+  +DispatchException(STransportReqMsg, ret, err_msg)
+
 }
 
 class ConnPoolConnector {
@@ -468,6 +490,232 @@ Connector* ConnectorManager::GetConnector(STransportReqMsg* req_msg) {
 ```
 
 ## Connector
+
+Connector 作为抽象类实现了核心网络逻辑，包括：
+
+- 创建 TCP/UDP 连接的逻辑
+- 将请求的上下文进行保存
+- 网络请求逻辑
+- 分发网络响应的处理 Task
+
+Connector 的子类 ConnComplexConnector 和 ConnPoolConnector 主要是实现：
+
+- 如何选择发起请求的连接
+- 如何构造连接的 conn_id
+- 如何构造请求的 request_id
+- 如何处理请求的响应
+
+对于 Connector 创建 TCP 连接的逻辑，会由子类根据自己的策略调用构建 Connector。
+
+创建连接的核心是构造 Connection Options，设置连接的处理回调，并建立连接：
+
+```cpp
+DefaultConnection* Connector::CreateTcpConnection(uint64_t conn_id) {
+  // 设置连接参数以及连接相关事件的回调
+  DefaultConnection::Options options = MakeConnectionOption(conn_id);
+
+  // 设置连接的 Socket
+  options.options.socket = Socket::CreateTcpSocket(options_.peer_addr.IsIpv6());
+
+  // 设置连接的 IO Handler，IO Handler 是如何使用 fd 进行相关 io 操作的封装
+  options.options.io_handler = IoHandlerFactory::GetInstance()->Create(options.options.socket.GetFd(),
+                                                                       *(options_.trans_info));
+
+  DefaultConnection* conn = new TcpConnection(options);
+  conn->DoConnect();
+
+  return conn;
+}
+
+DefaultConnection::Options Connector::MakeConnectionOption(uint64_t conn_id) {
+  // 构造连接参数
+  DefaultConnection::Options options;
+  // Connection::Options options;
+  options.recv_buffer_size = options_.trans_info->recv_buffer_size;
+  options.options.max_packet_size = options_.trans_info->max_packet_size;
+  options.merge_send_data_size = options_.trans_info->merge_send_data_size;
+  options.options.event_handler_id = options_.io_model->GetReactor()->GenEventHandlerId();
+  options.options.reactor = options_.io_model->GetReactor();
+  options.options.type = options_.trans_info->conn_type;
+  options.options.conn_id = conn_id;
+  options.options.client = true;
+
+  // 客户端ConnectionInfo只需要对端的IP/Port这些信息
+  ConnectionInfo connection_info;
+  connection_info.remote_addr = options_.peer_addr;
+  options.options.conn_info = std::move(connection_info);
+
+  // 设置 function
+  // trans_info 里本身就包含了很多回调处理，例如检查响应是否为完整的 Packet 等
+  auto* conn_handler = new FutureConnectionHandler(options_.trans_info);
+
+  conn_handler->SetNotifyMsgSendFunc([this](const ConnectionPtr& conn) { return this->NotifySendMsgFunction(conn); });
+  conn_handler->SetCleanFunc([this](const ConnectionPtr& conn) { this->ConnectionCleanFunction(conn); });
+  conn_handler->SetTimeUpdateFunc([this](const ConnectionPtr& conn) { this->ActiveTimeUpdate(conn); });
+  conn_handler->SetPipelineCountGetFunc([this](const ConnectionPtr conn) { return this->GetPipelineCount(conn); });
+
+  conn_handler->SetMsgHandleFunc([this](const ConnectionPtr& conn, std::deque<std::any>& data) {
+    // MessageHandleFunction 由 Connector 的子类实现
+    return this->MessageHandleFunction(conn, data);
+  });
+
+  options.options.conn_handler = conn_handler;
+
+  return options;
+}
+```
+
+对于请求上下文的保存，这也是由子类进行调用，上下文保存所需要的 request_id 也由子类根据自的策略生成。需要注意的是，上下文有两种：
+
+- 正常发起请求，请求的上下文会进行保存，并且具备超时时间：
+
+  ```cpp
+  void Connector::PushToSendReqTimeoutQueue(STransportReqMsg* req_msg) {
+    // req_msg 就是请求上下文，需要保存
+  
+    // 上下文空间满了，分发异常作为请求的响应
+    if (send_req_timeout_queue_->Size() > send_queue_size_limit_) {
+      DispatchException(req_msg, XrpcRetCode::XRPC_CLIENT_INVOKE_TIMEOUT_ERR, "Client Overload in Send Queue");
+      return;
+    }
+  
+    // 超时时间计算，如果为backup request请求的话，取 resend timeout
+    auto& client_extend_info = req_msg->extend_info->client_extend_info;
+    int64_t timeout = client_extend_info.retry_info && client_extend_info.backup_promise
+                          ? client_extend_info.retry_info->delay
+                          : req_msg->basic_info->timeout;
+    // 加上起始时刻
+    timeout += req_msg->basic_info->begin_timestamp;
+  
+    // 添加上下文到内存 request_id 就是 req_msg->basic_info->seq_id
+    send_req_timeout_queue_->Push(req_msg, req_msg->basic_info->seq_id, timeout, false);
+  }
+  
+  STransportReqMsg* Connector::PopSendTimeoutQueue(uint32_t request_id) {
+    // 根据 request_id 获得请求上下文
+    STransportReqMsg* msg = nullptr;
+    send_req_timeout_queue_->Erase(request_id, msg);
+    return msg;
+  }
+  ```
+
+- 由于连接正在建立，上下文会存放到 Pending 队列中，并且具备超时时间：
+
+  ```cpp
+  void Connector::PushToPendingTimeoutQueue(STransportReqMsg* req_msg) {
+    if (pending_req_timeout_queue_->Size() > pending_queue_size_limit_) {
+      DispatchException(req_msg, XrpcRetCode::XRPC_CLIENT_INVOKE_TIMEOUT_ERR, "Client Overload in Pending Queue");
+      return;
+    }
+  
+    // 超时时间计算，如果为backup request请求的话，取resend timeout
+    assert(req_msg->extend_info);
+    auto& client_extend_info = req_msg->extend_info->client_extend_info;
+    int64_t timeout = client_extend_info.retry_info && client_extend_info.backup_promise
+                          ? client_extend_info.retry_info->delay
+                          : req_msg->basic_info->timeout;
+    // 加上起始时刻
+    timeout += req_msg->basic_info->begin_timestamp;
+  
+    pending_req_timeout_queue_->Push(req_msg, req_msg->basic_info->seq_id, timeout, false);
+  }
+  
+  bool Connector::PopPendingSendTask(STransportReqMsg** req_msg) {
+    if (pending_req_timeout_queue_->GetSend(*req_msg)) {
+      pending_req_timeout_queue_->PopSend(true);
+      return true;
+    }
+    return false;
+  }
+  ```
+
+发送请求，核心就是用 conn->Send 的方法进行发送：
+
+```cpp
+int Connector::DoSend(STransportReqMsg* req_msg, Connection* conn) {
+  IoMessage message;
+  message.buffer = std::move(req_msg->send_data);
+  message.seq_id = req_msg->basic_info->seq_id;
+  int ret = conn->Send(std::move(message));
+  if (ret != 0) {
+    std::string error = "network send error, peer addr:";
+    error += options_.peer_addr.ToString();
+    PopSendTimeoutQueue(req_msg->basic_info->seq_id);
+    DispatchException(req_msg, XrpcRetCode::XRPC_CLIENT_NETWORK_ERR, std::move(error));
+  }
+  return ret;
+}
+
+int Connector::SendOnly(STransportReqMsg* req_msg) {
+  auto* conn = GetConnection(req_msg);
+  if (conn) {
+    IoMessage message;
+    // default tcp connection 下只需要设置data字段
+    assert(req_msg);
+    message.buffer = std::move(req_msg->send_data);
+    message.seq_id = req_msg->basic_info->seq_id;
+    return conn->Send(std::move(message));
+  }
+  return -1;
+}
+```
+
+当请求存在响应时，会将响应处理打包为一个 Task，并分发给相应线程进行处理，核心逻辑是：
+
+- 使用 trans_info 中设置的 task 分发函数，将 task 分发给线程
+- task 通过设置 promise 来通知 future 回调
+
+```cpp
+void Connector::DispatchResponse(STransportReqMsg* req_msg, STransportRspMsg&& rsp_msg) {
+  // 这里的响应处理是设置构造一个task，其中handler为promise设置value，然后提交到业务HandleModel的task队列中
+  Task* task = new Task();
+  task->task_type = TaskType::TRANSPORT_RESPONSE;
+  task->task = req_msg;
+  // 设置对应的handler
+  task->handler = [req_msg, rsp_msg = std::move(rsp_msg)](Task* task) mutable {
+    auto promise = req_msg->extend_info->client_extend_info.promise;
+
+    // 设置 promise 触发 future 的回调
+    promise->SetValue(std::move(rsp_msg));
+
+    // 首个请求成功，直接取消resend回调，结束调用
+    auto backup_promise = req_msg->extend_info->client_extend_info.backup_promise;
+    if (backup_promise) {
+      NotifyBackupRequestOver(backup_promise);
+    }
+  };
+
+  // 执行上层设置的 rsp_dispatch_function，实现 Task 的分发
+  options_.trans_info->rsp_dispatch_function(task);
+}
+```
+
+响应如果失败，也会进行分发，触发 future 回调：
+
+```cpp
+void Connector::DispatchException(STransportReqMsg* req_msg, int ret, std::string&& err_msg) {
+  // 这里的响应处理是设置构造一个task，其中handler为promise设置value，然后提交到业务HandleModel的task队列中
+  Task* task = new Task();
+  task->task_type = TaskType::TRANSPORT_RESPONSE;
+  task->task = req_msg;
+  // 设置对应的handler
+  task->handler = [req_msg, ret, msg = std::move(err_msg)](Task* task) mutable {
+    // 如果存在 backup 则触发 backup 的请求
+    auto backup_promise = req_msg->extend_info->client_extend_info.backup_promise;
+    if (backup_promise) {
+      Exception ex(CommonException("Invoke failed", XRPC_INVOKE_UNKNOWN_ERR));
+      NotifyBackupRequestResend(ex, req_msg->extend_info->client_extend_info.backup_promise);
+    }
+
+    // promise 失败
+    auto promise = req_msg->extend_info->client_extend_info.promise;
+    promise->SetException(ex);
+  };
+
+  // 执行上层设置的rsp_dispatch_function，实现Task的分发
+  options_.trans_info->rsp_dispatch_function(task);
+}
+```
 
 ### ConnComplexConnector
 
