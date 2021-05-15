@@ -16,8 +16,8 @@
     - [TransportAdapter](#transportadapter)
     - [ConnectorManager](#connectormanager)
     - [Connector](#connector)
-        - [ConnComplexConnector](#conncomplexconnector)
         - [ConnPoolConnector](#connpoolconnector)
+        - [ConnComplexConnector](#conncomplexconnector)
     - [IO Handler](#io-handler)
     - [Retry](#retry)
     - [STransportReqMsg](#stransportreqmsg)
@@ -45,8 +45,12 @@ TransportAdapter --> ConnectorManager
 ConnectorManagerOptions <-- ConnectorManager
 
 ConnectorManager --> Connector
+ConnectorOptions <-- Connector
+
 Connector <|-- ConnPoolConnector
 Connector <|-- ConnComplexConnector
+
+ConnPoolConnector --> ConnPool
 
 class ClientTransport {
   +Name()
@@ -132,12 +136,48 @@ class Connector {
 
 }
 
+class ConnectorOptions {
+  +IoModel* io_model
+  +TransInfo* trans_info;
+  +NetworkAddress peer_addr;
+}
+
 class ConnPoolConnector {
-  
+  +ConnPool conn_pool_
+  +Destory() int
+  +SendReqMsg(STransportReqMsg) int
+  +MessageHandleFunction(conn, rsp_list) bool
+  +ActiveTimeUpdate(conn)
+  +NotifySendMsgFunction(conn)
+  +ConnectionCleanFunction(conn)
+  +CreateConnection(conn_id) DefaultConnection
+  +GetConnection(STransportReqMsg) DefaultConnection
+  +SetReqTimeoutHandler()
+  +RemoveIdleConnection()
 }
 
 class ConnComplexConnector {
   
+}
+
+class ConnPool {
+  +uint16_t reactor_id_;
+  +uint64_t max_conn_num_;
+  +stack<uint64_t> free_;
+  +vector<bool> is_in_;
+  +vector<DefaultConnection*> list_;
+  +map<uint64_t, uint64_t> connections_active_time_;
+  +Init(max_conn_num) int
+  +GenConnectionId() uint64_t
+  +AddConnection(conn) bool
+  +GetConnection(connection_id) DefaultConnection
+  +DelConnection(connection_id)
+  +RecycleConnection(connection_id)
+  +RemoveIdleTimeoutConnection(idel_timeout_interval) vector
+  +IsEmpty() bool
+  +UpdateConnActiveState(conn_id)
+  +Destory() int
+  +SizeOfFree() int
 }
 ```
 
@@ -650,7 +690,7 @@ int Connector::SendOnly(STransportReqMsg* req_msg) {
   auto* conn = GetConnection(req_msg);
   if (conn) {
     IoMessage message;
-    // default tcp connection 下只需要设置data字段
+    // default tcp connection 下只需要设置 data 字段
     assert(req_msg);
     message.buffer = std::move(req_msg->send_data);
     message.seq_id = req_msg->basic_info->seq_id;
@@ -667,7 +707,7 @@ int Connector::SendOnly(STransportReqMsg* req_msg) {
 
 ```cpp
 void Connector::DispatchResponse(STransportReqMsg* req_msg, STransportRspMsg&& rsp_msg) {
-  // 这里的响应处理是设置构造一个task，其中handler为promise设置value，然后提交到业务HandleModel的task队列中
+  // 这里的响应处理是设置构造一个task，其中 handler 为 promise 设置 value，然后提交到业务 HandleModel 的 task 队列中
   Task* task = new Task();
   task->task_type = TaskType::TRANSPORT_RESPONSE;
   task->task = req_msg;
@@ -717,9 +757,388 @@ void Connector::DispatchException(STransportReqMsg* req_msg, int ret, std::strin
 }
 ```
 
-### ConnComplexConnector
-
 ### ConnPoolConnector
+
+ConnPoolConnector 是连接池 Connector，其包含了一组连接，并通过连接池进行并发网络请求。ConnPoolConnector 建立时会注册两个定时器：
+
+1. 用于清理空闲连接的定时器。即连接长时间没有网络事件会自动关闭连接。
+1. 用于检查
+
+```cpp
+ConnPoolConnector::ConnPoolConnector(const Options& options)
+    : Connector(options), conn_pool_(options.io_model->GetReactor()->Id()) {
+  conn_pool_.Init(options_.trans_info->max_conn_num);
+
+  // 注册空闲连接清理定时任务，每秒执行 1 词
+  uint32_t timer_index = options_.io_model->GetReactor()->AddTimerAfter(0, 10000, [this]() { this->RemoveIdleConnection(); });
+  timer_index_vec_.push_back(timer_index);
+
+  // 注册请求队列超时检测定时任务(包括已发送和 pending 中的请求)
+  // 每十秒执行一次
+  timer_index = options_.io_model->GetReactor()->AddTimerAfter(0, 10, [this]() { this->SetReqTimeoutHandler(); });
+  timer_index_vec_.push_back(timer_index);
+}
+
+void ConnPoolConnector::RemoveIdleConnection() {
+  // 从连接池中获得满足空闲时间条件的连接
+  auto conn_vec = conn_pool_.RemoveIdleTimeoutConnection(options_.trans_info->connection_idle_timeout);
+  for (auto conn : conn_vec) {
+    // 判断连接是否还有请求在等待应答，避免因 timeout 长于空闲连接超时时间而误删连接
+    if (!send_req_timeout_queue_->IsInQueue(conn->GetConnId() & kConnIdMask)) {
+      conn->DoClose();
+    }
+  }
+}
+
+void ConnPoolConnector::SetReqTimeoutHandler() {
+  STransportReqMsg* msg = nullptr;
+
+  // send_req_timeout_queue_ 是发送中但未收到响应的队列，这也是存放的请求上下文
+  // 每次迭代出一个超时的请求超时下文
+  while (send_req_timeout_queue_->Timeout(msg)) {
+
+    // 如果存在 backup promise 则触发 backup 请求的发送
+    if (msg->extend_info->client_extend_info.backup_promise) {
+      Exception ex(CommonException("Resend timeout", XRPC_CLIENT_INVOKE_TIMEOUT_ERR));
+      Connector::NotifyBackupRequestResend(ex, msg->extend_info->client_extend_info.backup_promise);
+
+      // 把请求包重新放回队列:需要重新设置超时时间
+      msg->basic_info->timeout -= msg->extend_info->client_extend_info.retry_info->delay;
+      PushToSendReqTimeoutQueue(msg);
+      continue;
+    }
+
+    // 派发超时响应
+    std::string error = "Future invoke timeout peeraddr= " + options_.peer_addr.ToString();
+    DispatchException(msg, XrpcRetCode::XRPC_CLIENT_INVOKE_TIMEOUT_ERR, std::move(error));
+
+    // 连接池模式下，请求超时，需要关闭连接(避免响应串包)
+    // 如果继续用这个连接发数据，收到的响应可能是之前请求的，但是之前请求的上下文已经因为超时而删除
+    conn_pool_.GetConnection(msg->basic_info->connection_id)->DoClose();
+  }
+
+  // pending_req_timeout_queue_ 是由于连接未建立完成导致无法发送数据而将数据缓存的队列
+  // 每次迭代出一个超时的请求超时下文
+  while (pending_req_timeout_queue_->Timeout(msg)) {
+    // 如果存在 backup promise 则触发 backup 请求的发送
+    if (msg->extend_info->client_extend_info.backup_promise) {
+      Exception ex(CommonException("Resend pending timeout", XRPC_CLIENT_INVOKE_TIMEOUT_ERR));
+      Connector::NotifyBackupRequestResend(ex, msg->extend_info->client_extend_info.backup_promise);
+
+      // 把请求包重新放回队列:需要重新设置超时时间
+      msg->basic_info->timeout -= msg->extend_info->client_extend_info.retry_info->delay;
+      PushToPendingTimeoutQueue(msg);
+      continue;
+    }
+
+    // 派发超时响应
+    DispatchException(msg, XrpcRetCode::XRPC_CLIENT_INVOKE_TIMEOUT_ERR, "Future invoke timeout before send");
+    // 连接池模式下，请求超时，因为 pending 队列中的请求并没有发送出去，所以不需要将 pending 队列中的连接关闭
+  }
+}
+```
+
+ConnPoolConnector 最核心的逻辑之一是数据发送，其关键点是：
+
+- 请求上下文的 id 是连接 ID，这是自然的，因为一个连接同一时间只会发送一个请求。
+- 发送数据时，若连接池中没有可用的连接会创建一个新的连接。
+- 如果连接池已经耗尽，无法创建新的连接，请求会缓存在 pending_req_timeout_queue_ 队列中，等待存在可用连接时发送。
+
+```cpp
+int ConnPoolConnector::SendReqMsg(STransportReqMsg* req_msg) {
+  // 连接达到上限且全部分配,放到 pending 队列
+  DefaultConnection* conn = GetConnection(req_msg);
+  if (!conn) {
+    PushToPendingTimeoutQueue(req_msg);
+    return 0;
+  }
+
+  // 连接始终无法建立成功，将连接关掉
+  if (conn->GetConnectionState() == DefaultConnection::ConnectionState::kConnecting &&
+        kConnectInterval + conn->GetDoConnectTimestamp() < TimeProvider::GetNowMs()) {
+      ushToPendingTimeoutQueue(req_msg);
+      conn->DoClose();  // 触发清理操作
+      return 0;
+  }
+
+
+  // 使用连接 ID 作为请求上下文的 ID
+  req_msg->basic_info->connection_id = conn->GetConnId();
+  req_msg->basic_info->seq_id = (conn->GetConnId() & kConnIdMask);
+
+  // 连接可用，直接发到请求超时队列中
+  PushToSendReqTimeoutQueue(req_msg);
+  return DoSend(req_msg, conn);
+}
+
+DefaultConnection* ConnPoolConnector::GetConnection(STransportReqMsg* req_msg) {
+  // 连接 ID 用尽，直接返回 nullptr
+  uint64_t conn_id = conn_pool_.GenConnectionId();
+  if (conn_id == 0) {
+    return nullptr;
+  }
+
+  // 根据连接 ID 获得连接
+  DefaultConnection* conn = conn_pool_.GetConnection(conn_id);
+  if (conn != nullptr) {
+    return conn;
+  }
+
+  // 连接 ID 对应的连接为空 则创建连接
+  conn = CreateConnection(conn_id);
+  if (conn->GetConnectionState() == TcpConnection::ConnectionState::kUnconnected) {
+    // 连接创建失败
+    conn_pool_.DelConnection(conn_id);
+    return nullptr;
+  }
+
+  conn_pool_.AddConnection(conn);
+  return conn;
+}
+```
+
+ConnPoolConnector 的另一个核心逻辑是处理请求的响应，其关键点是：
+
+- 解析响应。
+- 获取请求上下文进行处理。
+- 分发响应 Task 处理。
+- 处理完响应 Task 分发后会直接取 pending_req_timeout_queue_ 中的消息进行发送。
+- 若连接没有其他事物需要处理，则将其回收至连接池中。
+
+```cpp
+bool ConnPoolConnector::MessageHandleFunction(const ConnectionPtr& conn,
+                                              std::deque<std::any>& rsp_list) {
+  // 迭代所有响应消息
+  for (auto&& rsp_buf : rsp_list) {
+    // 解析响应到 rsp_protocol
+    ProtocolPtr rsp_protocol;
+    bool ret = options_.trans_info->rsp_decode_function(std::move(rsp_buf), rsp_protocol);
+
+    // 通过 connection id 获得请求上下文
+    uint32_t request_id = (conn->GetConnId() & kConnIdMask);
+    STransportReqMsg* msg = PopSendTimeoutQueue(request_id);
+
+    // 由于某些原因导致请求上下文不存在，直接调过对响应的处理
+    if (!msg) {
+      continue;
+    }
+
+    // 解析响应失败
+    if (!ret) {
+      std::string error = "Decode Failed peeraddr= " + options_.peer_addr.ToString();
+      DispatchException(msg, XrpcRetCode::XRPC_CLIENT_DECODE_ERR, std::move(error));
+      conn->DoClose();
+      continue;
+    }
+
+    // 分发响应
+    STransportRspMsg rsp_msg;
+    rsp_msg.msg = std::move(rsp_protocol);
+    DispatchResponse(msg, std::move(rsp_msg));
+  }
+
+  // 发送 Pending 队列中的连接
+  // 如果 Pending 为空，将连接归还到连接池
+  if (!SendPendingMsg(conn)) conn_pool_.RecycleConnection(conn->GetConnId());
+  return true;
+}
+
+bool ConnPoolConnector::SendPendingMsg(ConnectionPtr conn) {
+
+  // 如果不存在 pending 的请求 直接返回
+  STransportReqMsg* req_msg = nullptr;
+  if (!PopPendingSendTask(&req_msg)) {
+    return false;
+  }
+
+  // 连接复用模式下，发送之前需要将请求的 request_id 设置为连接 id
+  req_msg->basic_info->connection_id = conn->GetConnId();
+  req_msg->basic_info->seq_id = (conn->GetConnId() & kConnIdMask);
+  // 连接可用之后，把pending超时队列中的请求，移到请求超时队列中,并发送
+  PushToSendReqTimeoutQueue(req_msg);
+
+  // 使用Connection发送请求
+  DoSend(req_msg, conn);
+
+  return true;
+}
+```
+
+连接保活事件会更新相关连接的活跃状态：
+
+```cpp
+void ActiveTimeUpdate(Connection* conn) override {
+  conn_pool_.UpdateConnActiveState(conn->GetConnId());
+}
+```
+
+#### ConnPool
+
+ConnPool 对于 ConnPoolConnector 是一个很重要的类，连接 ID 的构建、连接保活、连接池维护都是依赖于该类。
+
+ConnPool 初始化时会先明确连接池大小，并初始化连接序号，魔数 Magic：
+
+```cpp
+// 默认连接池大小时 10w 连接
+ConnPool::ConnPool(uint16_t reactor_id) : reactor_id_(reactor_id), max_conn_num_(100000), magic_(GenMagic(reactor_id)) {
+  Init(max_conn_num_);
+}
+
+// 连接池通常会由外层主动调用 Init 重新进行一次构造
+void ConnPool::Init(uint32_t max_conn_num) {
+  if (!free_.empty()) {
+    std::stack<uint64_t> empty;
+    std::swap(free_, empty);
+  }
+
+  // list 建立了连接序号和连接的映射
+  list_.clear();
+  list_.resize(max_conn_num + 1);
+
+  // is_in_ 标识连接序号是否在连接池中
+  // is_in_[i] == true 标识序号 i 的连接在连接池中，未使用
+  is_in_.clear();
+  is_in_.resize(max_conn_num + 1);
+
+  for (uint64_t i = 1; i <= max_conn_num; ++i) {
+    list_[i] = nullptr;
+    free_.push(i);
+    is_in_[i] = true;
+  }
+
+  max_conn_num_ = max_conn_num;
+}
+```
+
+需要注意的时，连接 ID 并非连接序号，而是关联了一个魔数，这是用于将不同 Reactor 的连接 ID 进行隔离，连接 ID 是一个 48 Bit 的结构：
+
+```text
++---------------------------------------+
+|                48 Bit                 |
++-------------------+-------------------+
+|    High 16 Bit    |    Low 32 Bit     |
++-------------------+-------------------+
+| Magic(reactor_id) | Magic(reactor_id) |
++-------------------+-------------------+
+```
+
+生成连接 ID，向连接池中添加一个连接：
+
+```cpp
+uint64_t ConnPool::GenConnectionId() {
+  // 连接池中的连接序号耗尽
+  if (free_.empty()) {
+    return 0;
+  }
+
+  uint64_t uid = free_.top();
+  free_.pop();
+
+  // 连接处于使用中
+  is_in_[uid] = false;
+
+  // 构造连接 ID
+  return magic_ | uid;
+}
+
+bool ConnPool::AddConnection(DefaultConnection* conn) {
+  auto connection_id = conn->GetConnId();
+  auto magic = 0x0000FFFF00000000 & connection_id;
+  auto uid = 0x00000000FFFFFFFF & connection_id;
+
+  assert(magic == magic_ && uid > 0 && uid <= max_conn_num_);
+
+  // 序号对应的连接已经存在，不能添加，失败
+  if (list_[uid] != nullptr) {
+    return false;
+  }
+
+  // 序号对应的连接保存，记录连接活跃时间
+  list_[uid] = conn;
+  connections_active_time_[uid] = TimeProvider::GetNowMs();
+  return true;
+}
+
+DefaultConnection* ConnPool::GetConnection(uint64_t connection_id) {
+  auto magic = 0x0000FFFF00000000 & connection_id;
+  auto uid = 0x00000000FFFFFFFF & connection_id;
+
+  assert(magic == magic_ && uid > 0 && uid <= max_conn_num_);
+  return list_[uid];
+}
+
+// 连接清理或者连接创建失败都会把连接从池中删除，连接 ID 归还连接池
+void ConnPool::DelConnection(uint64_t connection_id) {
+  auto magic = 0x0000FFFF00000000 & connection_id;
+  auto uid = 0x00000000FFFFFFFF & connection_id;
+
+  assert(magic == magic_ && uid > 0 && uid <= max_conn_num_);
+
+  list_[uid] = nullptr;
+
+  // 连接序号不在池中，归还序号
+  if (!is_in_[uid]) {
+    free_.push(uid);
+    is_in_[uid] = true;
+  }
+
+  // 连接活跃时间记录中剔除
+  auto it = connections_active_time_.find(uid);
+  if (it != connections_active_time_.end()) {
+    connections_active_time_.erase(it);
+  }
+}
+```
+
+当连接使用完需要归还连接序号给连接池，方便下次再使用该连接：
+
+```cpp
+void ConnPool::RecycleConnection(uint64_t connection_id) {
+  auto magic = 0x0000FFFF00000000 & connection_id;
+  auto uid = 0x00000000FFFFFFFF & connection_id;
+
+  assert(magic == magic_ && uid > 0 && uid <= max_conn_num_);
+
+  if (!is_in_[uid]) {
+    is_in_[uid] = true;
+    free_.push(uid);
+  }
+}
+```
+
+当发生了网络事件，会触发保活事件，让 ConnPool 刷新时间：
+
+```cpp
+void ConnPool::UpdateConnActiveState(uint64_t conn_id) {
+  auto magic = 0x0000FFFF00000000 & conn_id;
+  auto uid = 0x00000000FFFFFFFF & conn_id;
+
+  assert(magic == magic_ && uid > 0 && uid <= max_conn_num_);
+
+  auto it = connections_active_time_.find(uid);
+  if (it != connections_active_time_.end()) it->second = TimeProvider::GetNowMs();
+}
+```
+
+每秒会遍历 connections_active_time_，找出空闲超时的连接：
+
+```cpp
+std::vector<DefaultConnection*> ConnPool::RemoveIdleTimeoutConnection(uint64_t idel_timeout_interval) {
+  uint64_t now = TimeProvider::GetNowMs();
+
+  std::vector<DefaultConnection*> conn_to_del;
+  auto it = connections_active_time_.begin();
+  while (it != connections_active_time_.end()) {
+    if (now > it->second && now - it->second >= idel_timeout_interval) {
+      conn_to_del.push_back(list_[it->first]);
+    }
+    it++;
+  }
+  return conn_to_del;
+}
+```
+
+### ConnComplexConnector
 
 ## IO Handler
 

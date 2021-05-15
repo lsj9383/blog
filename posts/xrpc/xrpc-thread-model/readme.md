@@ -846,7 +846,7 @@ xrpc::Task* task = new xrpc::Task();
 task->group_id = thread_model->GetThreadModelId();      // 线程模型 ID
 task->task_type = TaskType::TRANSPORT_REQUEST;          // 任务的类型
 task->dst_thread_key = -1;                              // 随机选择一个 Worker 执行 Task
-task->handler = [](Task* task) mutable {
+task->handler = [](Task* task) {
     std::cout << "hello world" << std::endl;
 };
 ```
