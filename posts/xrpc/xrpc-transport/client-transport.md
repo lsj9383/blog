@@ -20,7 +20,7 @@
         - [ConnComplexConnector](#conncomplexconnector)
     - [IO Handler](#io-handler)
     - [Retry](#retry)
-    - [STransportReqMsg](#stransportreqmsg)
+    - [TransportMessage](#transportmessage)
     - [Options](#options)
         - [FutureTransport::Options](#futuretransportoptions)
         - [TransInfo](#transinfo)
@@ -1290,7 +1290,103 @@ void ActiveTimeUpdate(ConnectionPtr conn) {
 
 ## Retry
 
-## STransportReqMsg
+## TransportMessage
+
+Transport 对外暴露的暴露的发送接口参数是 `STransportReqMsg`，响应数据是 `STransportRspMsg`，这两个结构本质上都是 `TransportMessage`：
+
+```cpp
+using STransportReqMsg = TransportMessage;
+using STransportRspMsg = TransportMessage;
+```
+
+因此其结构是重要的，STransportReqMsg 里包含了一些重要的信息，这个结构也作为请求的上下文存在。
+
+```cpp
+struct TransportMessage {
+  // 记录 Transport 的基本信息，例如使用的连接 ID、连接类型、fd、对端地址 等。
+  // 这里面的应用层使用方并不需要填，这个结构里的信息是框架自动填的。
+  BasicInfo*  basic_info = nullptr;
+
+  // 扩展信息，使用方法通过该结构体提供一些辅助能力
+  // 例如触发应用层 future 回调的 promise，记录相关处理的分发信息 等
+  ExtendInfo* extend_info = nullptr;
+
+  // 应用层定义的消息结构体对象，响应会将消息解析并结构化后放在 msg 中
+  std::any msg = nullptr;
+
+  // msg 消息的二进制底层数据，发送数据直接用它
+  // message.buffer = TransportMessage->send_data;
+  // conn->Send(std::move(message))
+  NoncontiguousBuffer send_data;
+};
+
+struct ExtendInfo {
+  ProtocolMessageMetadata metadata{};
+  ServerExtendInfo server_extend_info;
+  ClientExtendInfo client_extend_info;
+};
+
+struct ClientExtendInfo {
+  // 保存请求回包的 promise
+  void* promise = nullptr;
+
+  // 触发 backup 处理的 promise
+  void* backup_promise = nullptr;
+  RetryInfo* retry_info = nullptr;
+
+  // 处理分发信息
+  ThreadModelDispatchInfo* dispatch_info = nullptr;
+};
+
+struct ThreadModelDispatchInfo {
+  // 请求发起的thread_model id
+  int src_thread_model_id = -1;
+
+  // 请求发起线程id
+  int src_thread_id = -1;
+
+  // 应答处理的目的线程id
+  int dst_thread_key = -1;
+};
+
+struct BasicInfo {
+  // 标识
+  uint64_t flag = 0;
+
+  // 连接唯一id
+  uint64_t connection_id = 0;
+
+  // 连接类型
+  ConnectionType connection_type;
+
+  // fd
+  int32_t fd = -1;
+
+  // 流唯一id
+  uint32_t stream_id = 0;
+
+  // req唯一id，标识请求上下文
+  uint32_t seq_id = 0;
+
+  // 请求的超时时间
+  uint32_t timeout = UINT32_MAX;
+
+  // 请求开始的时间戳
+  int64_t begin_timestamp = 0;
+
+  // 请求结束的时间戳
+  int64_t end_timestamp = 0;
+
+  // pipeline的数量
+  uint32_t pipeline_count = 1;
+
+  // 调用类型
+  RpcCallType call_type{RpcCallType::UNARY_CALL};
+
+  // ip/port相关信息
+  NodeAddr addr;
+};
+```
 
 ## Options
 
