@@ -19,7 +19,6 @@
         - [ConnPoolConnector](#connpoolconnector)
         - [ConnComplexConnector](#conncomplexconnector)
     - [IO Handler](#io-handler)
-    - [Retry](#retry)
     - [TransportMessage](#transportmessage)
     - [Options](#options)
         - [FutureTransport::Options](#futuretransportoptions)
@@ -51,6 +50,9 @@ Connector <|-- ConnPoolConnector
 Connector <|-- ConnComplexConnector
 
 ConnPoolConnector --> ConnPool
+
+ConnPool --> DefaultConnection
+ConnComplexConnector --> DefaultConnection
 
 class ClientTransport {
   +Name()
@@ -185,6 +187,17 @@ class ConnPool {
   +UpdateConnActiveState(conn_id)
   +Destory() int
   +SizeOfFree() int
+}
+
+class DefaultConnection {
+  +DefaultConnectionOptions options_
+  +uint64_t do_connect_timestamp_
+  +uint64_t establish_timestamp_
+  +struct read_buffer_
+  +deque<IoMessage> io_msgs_
+  +EnableReadWrite()
+  +DisableReadWrite()
+  +UpdateWriteEvent()
 }
 ```
 
@@ -1287,8 +1300,6 @@ void ActiveTimeUpdate(ConnectionPtr conn) {
 ```
 
 ## IO Handler
-
-## Retry
 
 ## TransportMessage
 
