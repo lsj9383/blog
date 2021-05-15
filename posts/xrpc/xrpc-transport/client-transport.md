@@ -29,6 +29,15 @@
 
 ## Overview
 
+Client Transport 封装了 Xrpc Network Model 实现了更方便的、易于扩展的接口，包括：
+
+- 用户可以自定义响应包检测函数
+- 用户可以自定义响应包反序列化函数
+- 用户可以自定义响应处理的线程
+- 封装了 Promise Future 接口，方便接收和处理响应
+- 封装了连接复用和连接池两种调用方式
+- 封装了请求上下文，接收响应时可以正确获取发送时的上下文
+
 ## Quick Start
 
 通过使用 Client Transport 的接口构造 HTTP 请求 Demo，来了解 Client Transport 如何使用：
@@ -66,34 +75,33 @@ void Test() {
   // 网络事件回调
   auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
   xrpc::TransInfo trans_info;
-  // 检查数据包是否接收，默认接收到的数据是完整的，直接返回
   trans_info.checker_function = [=](const xrpc::ConnectionPtr& conn,
                                     xrpc::NoncontiguousBuffer& in,
                                     std::deque<std::any>& out) {
+    // 检查数据包是否接收，默认接收到的数据是完整的，直接返回
     std::cout << "1. Check Function" << std::endl;
     out.push_back(in);
     in.Clear();
     return xrpc::PacketChecker::PACKET_FULL;
   };
-
-  // 将接收到的数据格式化，将响应存放在 直接返回 true
   trans_info.rsp_decode_function = [=](std::any&& in, xrpc::ProtocolPtr& out) {
+    // 将接收到的数据格式化，将响应存放在 直接返回 true
     std::cout << "2. Rsp Decode Function" << std::endl;
     out = std::make_shared<xrpc::XrpcResponseProtocol>();
     auto buf = std::any_cast<xrpc::NoncontiguousBuffer&&>(in);
     out->SetNonContiguousProtocolBody(std::move(buf));
     return true;
   };
-
-  // 分发处理 Task 的方法
   trans_info.rsp_dispatch_function = [=](xrpc::Task* task) {
+    // 分发处理 Task 的方法
     std::cout << "3. Rsp Dispatch Function" << std::endl;
     task->group_id = thread_model->GetThreadModelId();
     thread_model->SubmitHandleTask(task);
   };
-
-  trans_info.connection_idle_timeout = 50000;
   trans_info.conn_type = xrpc::ConnectionType::TCP_LONG;
+  trans_info.connection_idle_timeout = 50000;               // ms
+  trans_info.is_complex_conn = false;                       // 使用连接池方式 默认
+  trans_info.max_conn_num = 2;                              // Xrpc 默认用的是 64 个
 
   // 构造 Transport
   xrpc::FutureTransport::Options future_transport_option;
