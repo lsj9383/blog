@@ -1,5 +1,21 @@
 # Reactor
 
+<!-- TOC -->
+
+- [Reactor](#reactor)
+    - [Overview](#overview)
+    - [Example](#example)
+        - [Bad Implementation](#bad-implementation)
+        - [Problem](#problem)
+    - [Reactor Roles](#reactor-roles)
+    - [Collaborations](#collaborations)
+        - [Client Connects Scenarios](#client-connects-scenarios)
+        - [Client Sends Scenarios](#client-sends-scenarios)
+    - [Implementation](#implementation)
+    - [References](#references)
+
+<!-- /TOC -->
+
 ## Overview
 
 本文是对 [Reactor](http://www.dre.vanderbilt.edu/~schmidt/PDF/reactor-siemens.pdf) 一文的梳理和总结。
