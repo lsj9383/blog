@@ -1,8 +1,8 @@
-# Reactor
+# Reactor: An Object Behavioral Pattern
 
 <!-- TOC -->
 
-- [Reactor](#reactor)
+- [Reactor: An Object Behavioral Pattern](#reactor-an-object-behavioral-pattern)
     - [Overview](#overview)
         - [Example](#example)
         - [Bad Implementation](#bad-implementation)
@@ -27,11 +27,13 @@
 
 本文是对 [Reactor](http://www.dre.vanderbilt.edu/~schmidt/PDF/reactor-siemens.pdf) 一文的梳理和总结。
 
-Reactor 是一种事件处理模式，用于处理一个或多个输入同时交给 Server 程序进行处理的服务请求。服务处理程序对输入进行多路分解，并将它们同步的分发给关联的 Handler 进行处理。
+Reactor 的含义参考 Wiki 的解释：
+
+> The reactor design pattern is an event handling pattern for handling service requests delivered concurrently to a service handler by one or more inputs. The service handler then demultiplexes the incoming requests and dispatches them synchronously to the associated request handlers.
 
 ### Example
 
-为了产生 Reactor，考虑下图的事件驱动 Logging Server 示例：
+为了阐述 Reactor，考虑下图的事件驱动 Logging Server 示例：
 
 ![example](assets/example.png)
 
@@ -363,7 +365,7 @@ int main (void) {
 
 下面的时序图展示了各个组件之间的协作：
 
-![](assets/reactor-main.png)
+![reactor-main](assets/reactor-main.png)
 
 ## References
 
