@@ -1,4 +1,13 @@
 # XRPC Network Reactor
+<!-- TOC -->
+
+- [XRPC Network Reactor](#xrpc-network-reactor)
+    - [Overview](#overview)
+    - [Reactor Pattern](#reactor-pattern)
+    - [Xrpc Reactor Roles](#xrpc-reactor-roles)
+    - [Xrpc Reactor Sequence Diagram](#xrpc-reactor-sequence-diagram)
+
+<!-- /TOC -->
 
 ## Overview
 
