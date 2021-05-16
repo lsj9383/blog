@@ -42,7 +42,7 @@ Concrete Event Handler | TcpAcceptor / TcpConnection
 
 Xrpc Reactor 类图如下：
 
-![xrpc-reactor-roles](xrpc-reactor-roles.png)
+![xrpc-reactor-roles](assets/xrpc-reactor-roles.png)
 
 ## Xrpc Reactor Sequence Diagram
 
