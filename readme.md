@@ -4,6 +4,7 @@
 - [XRPC](posts/xrpc/readme.md)
   - [XRPC Thread Model](posts/xrpc/xrpc-thread-model/readme.md)
   - [XRPC Network Model](posts/xrpc/xrpc-network-model/readme.md)
+    - [Xrpc Network Reactor](posts/xrpc/xrpc-network-model/xrpc-reactor.md)
   - [XRPC Client Transport](posts/xrpc/xrpc-transport/client-transport.md)
 - [QUIC](posts/quic/readme.md)
   - [GQUIC](posts/quic/gquic/readme.md)

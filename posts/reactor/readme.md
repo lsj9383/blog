@@ -16,8 +16,6 @@
         - [Initiation Dispatcher](#initiation-dispatcher)
         - [Define the Event Handling Interface](#define-the-event-handling-interface)
         - [Implement the Concrete Event Handlers](#implement-the-concrete-event-handlers)
-            - [Implement Logging Acceptor](#implement-logging-acceptor)
-            - [Implement Logging Handler](#implement-logging-handler)
         - [Implement the Server](#implement-the-server)
     - [References](#references)
 
@@ -80,7 +78,7 @@ Portability | 将服务器移植到新的OS平台上不需要花费很多精力
 Role | Description
 -|-
 Handles | 句柄，标识操作系统资源，例如：网络连接、打开的文件、定时器等等。Synchronous Event Demultiplexer 可以等待 `Handles` 发生事件。
-Synchronous Event Demultiplexer | Blocking 集合 Handles 上的事件发生，例如 Linux 的 `select()`, `epoll()`。
+Synchronous Event Demultiplexer | 组塞等待 Handles 集合上的事件发生，例如 Linux 的 `select()`, `epoll()`。
 Initiation Dispatcher | 定义了一个可以注册、删除、分发 Event Handler 的接口。Synchronous Event Demultiplexer 检测到事件时，会由 `Initiation Dispatcher` 进行事件分发处理。
 Event Handler | 提供了 Hook 接口，在事件发生时触发 Hook 进行处理。该对象是抽象表示，具体如何处理由 Concrete Event Handler 实现。
 Concrete Event Handler | 实现 Event Handler 的 Hook 接口。将 `Concrete Event Handler` 注册到 Initiation Dispatcher 中，当 Event 发生，由 Initiation Dispatcher 回调 `Concrete Event Handler` 的 Hook 进行处理。
