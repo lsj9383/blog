@@ -374,23 +374,23 @@ telnet> quit
 
 ## UML Class Diagram
 
-在网络模型中，以下角色是重要且会经常碰到的：
+在 XTrpc Reactor 网络模型中，以下角色是重要且会经常碰到的：
 
-- Socket
-- EventHandler
-  - Acceptor
-  - Connection
-- EventHandleManager
-- ReactorImpl
-- EPollPoller
-- Epoll
+- ReactorImpl，映射到 Reactor 模式中的 Initiation Dispatcher。
+- EPollPoller，映射到 Reactor 模式中的 Synchronous Event Demultiplexer。
+- EventHandler，映射到 Reactor 模式中的 Event Handler。
+  - Acceptor，映射到 Reactor 模式中的 Concrete Event Handler。
+  - Connection，映射到 Reactor 模式中的 Concrete Event Handler。
+- EventHandleManager：EventHandler 管理器，Reactor 依托于该对象管理 EventHandler。
 
 ```mermaid
 classDiagram
 
   ReactorImpl --> DefaultEventHandlerManager
+  ReactorImpl --> EPollPoller
   DefaultEventHandlerManager --> EventHandler
 
+  AcceptorOption <-- Acceptor
   EventHandler <|-- Acceptor
   Acceptor <|-- TcpAcceptor
 
@@ -403,6 +403,12 @@ classDiagram
   DefaultConnectionOptions <-- DefaultConnection
   ConnectionOptions --> ConnectionHandler
   ConnectionOptions --> IoHandler
+
+    class EPollPoller {
+      +Epoll epoll_;
+      +Dispatch(timeout, func)
+      +UpdateEvent(event_handler)
+    }
 
     class ReactorImpl {
       +EventHandlerManager event_handler_manager_
@@ -452,9 +458,14 @@ classDiagram
       +IsEnableListen()
     }
 
+    class AcceptorOption {
+      +AcceptHandleFunction accept_handler
+      +NetworkAddress tcp_addr
+      +UnixAddress unix_addr
+    }
+
     class TcpAcceptor {
       +Socket socket_
-      +AcceptorOption options_
       +EnableListen(backlog=1024)
       +DisableListen()
       +HandleReadEvent()
