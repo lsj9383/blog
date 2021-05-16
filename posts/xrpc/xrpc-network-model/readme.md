@@ -374,7 +374,7 @@ telnet> quit
 
 ## UML Class Diagram
 
-在 XTrpc Reactor 网络模型中，以下角色是重要且会经常碰到的：
+在 Xrpc Reactor 网络模型中，以下角色是重要且会经常碰到的：
 
 - ReactorImpl，映射到 Reactor 模式中的 Initiation Dispatcher。
 - EPollPoller，映射到 Reactor 模式中的 Synchronous Event Demultiplexer。
