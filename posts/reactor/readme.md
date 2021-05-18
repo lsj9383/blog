@@ -154,7 +154,7 @@ Synchronous Event Demultiplexer 同步等待一个或多个事件发生，这通
   - 大多应用会使用单实例的 Reactor Pattern，此时只会有一个 Initiation Dispatcher。
   - 然而一些操作系统会限制单个线程可以使用并等待的 Handles 个数。在这种情况下，创建多线程，每个线程拥有自己的 Reactor Pattern（都包含一个 Initiation Dispatcher）。
 
-下面的 C++ 代码秒速了 Initiation Dispatcher 提供的核心方法：
+下面的 C++ 代码描述了 Initiation Dispatcher 提供的核心方法：
 
 ```cpp
 enum Event_Type
