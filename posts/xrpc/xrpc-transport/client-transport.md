@@ -378,45 +378,52 @@ participant conn as Connection
 io_thread ->> io_tasks_queue: 获取 Task
 io_tasks_queue -->> io_thread: 返回 Task
 
-io_thread ->> trans_adapter: 获取一个合适的 Connector 来发送数据
-trans_adapter ->> connector_manager: 获取一个 Connector
-connector_manager ->> connector_manager: 获得消息目标 endpoint: {type}:{ip}:{port}
-alt endpoint 存在对应的 Connector
-  connector_manager -->> trans_adapter: 直接返回 connector
-else endpoint 不存在对应的 Connector
-  connector_manager ->> connector: 新建 ConnPoolConnector 并返回
-  connector ->> connector: 启动空闲连接清理定时器
-  connector ->> connector: 启动发送超时检测定时器
-  connector -->> connector_manager: 返回 ConnPoolConnector 实例
-  connector_manager ->> connector_manager: 保存 endpoint 对应的 connector
-  connector_manager -->> trans_adapter: 直接新的 connector
-end
-connector_manager -->> trans_adapter: 返回 Connector
-trans_adapter -->> io_thread: 返回 Connector
-
-io_thread ->> connector: 发送数据
-connector ->> conn_pool: 获得连接
-alt 存在空闲连接
-  conn_pool -->> connector: 返回连接
-else 不存在空闲连接且没有超过限制
-  connector ->> conn: 创建新的连接
-  conn -->> connector: 返回连接实例
-  connector ->> conn: 请求建立连接
-  conn -->> connector: 返回，此时连接可能并未建立完成
-  connector ->> conn_pool: 将 Connection 添加到 ConnPool 中
-  conn_pool -->> connector: 返回连接
-else 没有可用的连接
-  conn_pool -->> connector: 返回 nullptr
+rect rgb(0, 255, 255, .1)
+  Note left of io_tasks_queue: 获取 Connector
+  io_thread ->> trans_adapter: 获取一个合适的 Connector 来发送数据
+  trans_adapter ->> connector_manager: 获取一个 Connector
+  connector_manager ->> connector_manager: 获得消息目标 endpoint: {type}:{ip}:{port}
+  alt endpoint 存在对应的 Connector
+    connector_manager -->> trans_adapter: 直接返回 connector
+  else endpoint 不存在对应的 Connector
+    connector_manager ->> connector: 新建 ConnPoolConnector 并返回
+    connector ->> connector: 启动空闲连接清理定时器
+    connector ->> connector: 启动发送超时检测定时器
+    connector -->> connector_manager: 返回 ConnPoolConnector 实例
+    connector_manager ->> connector_manager: 保存 endpoint 对应的 connector
+    connector_manager -->> trans_adapter: 直接新的 connector
+  end
+  connector_manager -->> trans_adapter: 返回 Connector
+  trans_adapter -->> io_thread: 返回 Connector
 end
 
-alt 没有可用连接
-  connector ->> connector: 缓存到 Pending 队列中
-else 有可用连接（即便 Connection 处于连接中）
-  connector ->> connector: 使用请求 id 作为 key，缓存请求上下文
-  connector ->> conn: 发送消息
-  conn -->> connector: 返回，此时消息可能并未发送出去
+rect rgb(120, 0, 255, .1)
+  Note left of io_tasks_queue: 发送数据
+  io_thread ->> connector: 发送数据
+  connector ->> conn_pool: 获得连接
+  alt 存在空闲连接
+    conn_pool -->> connector: 返回连接
+  else 不存在空闲连接且没有超过限制
+    connector ->> conn: 创建新的连接
+    conn -->> connector: 返回连接实例
+    connector ->> conn: 请求建立连接
+    conn -->> connector: 返回，此时连接可能并未建立完成
+    connector ->> conn_pool: 将 Connection 添加到 ConnPool 中
+    conn_pool -->> connector: 返回连接
+  else 没有可用的连接
+    conn_pool -->> connector: 返回 nullptr
+  end
+
+  alt 没有可用连接
+    connector ->> connector: 缓存到 Pending 队列中
+    conn -->> connector: 返回
+  else 有可用连接（即便 Connection 处于连接中）
+    connector ->> connector: 使用请求 id 作为 key，缓存请求上下文
+    connector ->> conn: 发送消息
+    conn -->> connector: 返回，此时消息可能并未发送出去
+  end
+  connector -->> io_thread: 完成
 end
-connector -->> io_thread: 完成
 ```
 
 **注意：**

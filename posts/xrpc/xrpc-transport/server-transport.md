@@ -30,7 +30,24 @@
 
 ## Overview
 
+Server Transport 封装了 Network Model 的接口，尤其是 TcpAcceptor，以提供稳定可靠 Server。用户可以使用 Server Transport 自定义一个 Server。
+
+Server Transport 的主要职责是：
+
+- 封装了对于 Server IP 和 Port 监听的接口。
+- 提供了简单的方式自定义了相关事件回调。
+- 提供了多个线程监使用相同监听端口的能力。
+- 提供了对客户端进行回包的能力。
+
 ## Quick Start
+
+我们通过构造使用 Server Transport 构造一个 TCP Echo Server 来简述 Server Transport 的接口和基本理念。
+
+```cpp
+int main(void) {
+  return 0;
+}
+```
 
 ## UML Class Diagram
 
