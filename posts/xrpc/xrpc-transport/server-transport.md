@@ -20,9 +20,11 @@
         - [BindAdapter Connection Closed And Clean](#bindadapter-connection-closed-and-clean)
         - [BindAdapter RemoveIdleConnection](#bindadapter-removeidleconnection)
         - [BindAdapter Send](#bindadapter-send)
+    - [DefaultConnectionHandler](#defaultconnectionhandler)
     - [ConnectionManager](#connectionmanager)
     - [Options](#options)
         - [BindInfo](#bindinfo)
+        - [BindAdapter::Options](#bindadapteroptions)
 
 <!-- /TOC -->
 
@@ -38,6 +40,8 @@ classDiagram
 ServerTransport <|-- ServerTransportImpl
 ServerTransportImpl --> BindAdapter
 BindAdapter --> ConnectionManager
+BindAdapter --> Acceptor
+ConnectionManager --> Connection
 
 class ServerTransport {
   +Name()
@@ -86,16 +90,94 @@ class ConnectionManager {
   +GetConnection(connection_id) Connection
   +DelConnection(connection_id)
 }
+
+class Acceptor {
+  +AcceptorOption options_
+  +EnableListen(backlog=1024)
+  +DisableListen()
+  +IsEnableListen()
+}
+
+class Connection {
+  +ConnectionOptions options_
+  +string local_ip_
+  +int local_port_
+  +string peer_ip_
+  +int peer_port_
+  +any user_any_
+  +Established()
+  +DoConnect()
+  +DoClose(destory = true)
+  +Send(IoMessage msg) int
+  +GetFd() int
+  +GetConnId() int
+}
 ```
 
 ## Sequence Diagram
+
+这里显示 Xrpc Server 如何监听并构造一个连接：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant main as Main
+participant server_transport as ServerTransport
+participant bind_adapter as BindAdapter
+participant acceptor as Acceptor
+participant connection_manager as ConnectionManager
+participant connection as Connection
+
+rect rgb(0, 255, 255, .1)
+  Note left of main: 开始监听
+  main ->> server_transport: 创建 ServerTransport
+  server_transport -->> main: 返回 ServerTransport 实例
+  main ->> main: 构造 BindInfo，其中包含需要监听的 IP 和端口、使用的协议等
+  main ->> server_transport: Bind(bind_info)
+  loop 为多个 IO 线程创建 BindAdapter（线程数由配置 BindInfo.accept_thread_num 决定）
+    server_transport ->> bind_adapter: 构造 BindAdapter
+    bind_adapter -->> server_transport: 返回 BindAdapter 实例
+  end
+  server_transport -->> main: 返回
+
+  main ->> server_transport: Listen 开始监听连接请求
+  loop 遍历所有的 BindAdapter:
+    server_transport ->> bind_adapter: Listen
+    bind_adapter ->> acceptor: 在相应的 IO Thread 的 Reactor 上开启监听
+    acceptor -->> bind_adapter: 返回
+    bind_adapter -->> server_transport: 返回
+  end
+  server_transport -->> main: 返回
+end
+
+rect rgba(0, 255, 0, .1)
+  Note left of main: 接收到新连接
+  acceptor ->> acceptor: 感知到新建连接事件，由 Reactor 感知并通知
+  acceptor ->> acceptor: Accept 连接，并构造 AcceptConnectionInfo
+  acceptor ->> server_transport: AcceptConnection
+  server_transport ->> server_transport: 创建 Connection
+  server_transport ->> connection_manager: 将 Connection 交给 ConnectionManager 管理
+  connection_manager -->> server_transport: 返回
+  server_transport -->> acceptor: 完成
+end
+
+rect rgba(255, 255, 0, .1)
+  Note left of main: 连接关闭
+  connection ->> connection: 感知到连接关闭事件，由 Reactor 感知并通知
+  connection ->> bind_adapter: CleanConnection 清理连接
+  bind_adapter ->> connection_manager: 剔除连接
+  bind_adapter ->> bind_adapter: 清理连接内存
+  bind_adapter --> connection: 返回
+end
+```
 
 ## ServerTransport
 
 `ServerTransport` 的实现类是 `ServerTransportImpl`，该类的作用主要是：
 
-- 封装了便于使用的监听接口
-- 封装了数据发送接口
+- 提供监听接口
+- 封装了向 Client 响应数据的接口
 - 支持多线程进行监听
 - 自动构造连接处理网络数据，通过 BindInfo 的相关回调对网络数据进行处理
 
@@ -207,7 +289,7 @@ bool ServerTransportImpl::AcceptConnection(const AcceptConnectionInfo& connectio
 
 ### ServerTransport Send
 
-ServerTransport 的 Send 会将数据的发送交给 BindAdapter 类负责，本质上是在随机 IO 线程上使用连接 ID 的连接发数据。
+ServerTransport 的 Send 用于向 Client 发送响应数据的，这里选择 Connection ID 所在 IO 线程的 BindAdapter 进行数据发送：
 
 ```cpp
 void ServerTransportImpl::SendMsg(STransportRspMsg* msg) {
@@ -358,7 +440,7 @@ void BindAdapter::RemoveIdleConnection() {
 
 ### BindAdapter Send
 
-BindAdapter 可以根据 SeqMsg 的 connection_id 得到连接 ID，并使用该连接 ID 发起sing求：
+BindAdapter 可以根据 SeqMsg 的 connection_id 得到连接 ID，并使用该连接 ID 发送数据，需要注意的是，这是用来发送响应：
 
 ```cpp
 int BindAdapter::SendMsg(STransportRspMsg* msg) {
@@ -366,37 +448,135 @@ int BindAdapter::SendMsg(STransportRspMsg* msg) {
   task->task_type = TaskType::TRANSPORT_RESPONSE;
   task->dst_thread_key = options_.thread_id;
   task->task = msg;
-
   task->handler = [this](Task* task) {
     auto* msg = static_cast<STransportRspMsg*>(task->task);
+    IoMessage message;
+    message.ip = msg->basic_info->addr.ip;
+    message.port = msg->basic_info->addr.port;
+    message.buffer = std::move(msg->send_data);
+
     Connection* conn = conn_manager_.GetConnection(msg->basic_info->connection_id);
-    if (conn) {
-      IoMessage message;
-      message.ip = msg->basic_info->addr.ip;
-      message.port = msg->basic_info->addr.port;
-      message.buffer = std::move(msg->send_data);
-
-      conn->Send(std::move(message));
-    }
-
-    delete msg;
-    msg = nullptr;
+    conn->Send(std::move(message));
   };
+
   task->group_id = options_.thread_model->GetThreadModelId();
   TaskResult result = options_.thread_model->SubmitIoTask(task);
-  if (result.ret == TaskRetCode::QUEUE_FULL) {
-    delete msg;
-    msg = nullptr;
-    return -1;
-  }
-
   return 0;
 }
 ```
 
+## DefaultConnectionHandler
+
+ServerTransport 在创建一个连接后，会设置连接的事件回调 Handler 为 `DefaultConnectionHandler`，其提供实现主要是实现了：
+
+- 处理连接关闭事件的清理工作
+- 处理连接保活事件
+- 除了上述两个事件外，其他事件都会进一步回调 `BindInfo` 中的函数
+
+```cpp
+class DefaultConnectionHandler : public ConnectionHandler {
+ public:
+  explicit DefaultConnectionHandler(BindAdapter* bind_adapter) : bind_adapter_(bind_adapter) {}
+  ~DefaultConnectionHandler() {}
+
+  // 连接相关的资源清理接口
+  void ConnectionClean(const ConnectionPtr& conn) override { bind_adapter_->CleanConnection(conn); }
+
+  // 连接保活的时间更新接口
+  void ConnectionTimeUpdate(const ConnectionPtr& conn) override {
+    auto& connections_active_time = bind_adapter_->GetConnectionActiveTime();
+    connections_active_time[conn->GetConnId()] = xrpc::TimeProvider::GetNowMs();
+  }
+
+  // 消息协议的完整性检测接口
+  int MessageCheck(const ConnectionPtr& conn, NoncontiguousBuffer& in,
+                   std::deque<std::any>& out) override {
+    return bind_adapter_->GetOptions().bind_info.checker_function(conn, in, out);
+  }
+
+  // 消息协议处理接口
+  bool MessageHandle(const ConnectionPtr& conn, std::deque<std::any>& msg) override {
+    return bind_adapter_->GetOptions().bind_info.msg_handle_function(conn, msg);
+  }
+
+  // 连接建立成功后的处理接口
+  void ConnectionEstablished(const ConnectionPtr& conn) override {
+    bind_adapter_->GetOptions().bind_info.conn_establish_function(conn);
+  }
+
+  // 连接关闭后的处理接口
+  void ConnectionClosed(const ConnectionPtr& conn) override {
+    bind_adapter_->GetOptions().bind_info.conn_close_function(conn);
+  }
+
+  void MessageWriteDone(uint32_t seq_id) override {
+    // 目前ConnectionPtr参数暂不可用，传参为nullptr；IoMessage参数只有seq_id可用
+    IoMessage message;
+    message.ip = seq_id;
+    bind_adapter_->GetOptions().bind_info.msg_writedone_function(nullptr, std::move(message));
+  }
+
+ private:
+  BindAdapter* bind_adapter_;
+};
+```
+
 ## ConnectionManager
 
+ConnectionManager 是一个连接池，用于管理 BindAdapter 接收到的连接。
+
+BindAdapter 接收到一个连接时，需要通过 GenConnectionId 赋予该连接一个 Connection ID：
+
+```cpp
+uint64_t ConnectionManager::GenConnectionId() {
+  // 管理连接数超过限制（用户定义），返回失败
+  if (cur_conn_num_ >= max_conn_num_) {
+    return 0;
+  }
+
+  // 管理连接数超过最大限制（系统定义，写死的），返回失败
+  if (free_.empty()) {
+    return 0;
+  }
+
+  uint64_t uid = free_.front();
+  free_.pop();
+  return magic_ | uid;
+}
+```
+
+当 BindAdapter 添加一个连接后，需要通过 AddConnection 接口告知 ConnectionManager：
+
+```cpp
+bool ConnectionManager::AddConnection(Connection* conn) {
+  auto connection_id = conn->GetConnId();
+  auto uid = 0x00000000FFFFFFFF & connection_id;
+
+  if (list_[uid] != nullptr) {
+    return false;
+  }
+
+  list_[uid] = conn;
+
+  ++cur_conn_num_;
+  return true;
+}
+```
+
+当一个连接关闭的时候，需要将其从 ConnectionManager 中剔除，通过 `DelConnection` 接口完成：
+
+```cpp
+void ConnectionManager::DelConnection(uint64_t connection_id) {
+  auto uid = 0x00000000FFFFFFFF & connection_id;
+  list_[uid] = nullptr;
+  free_.push(uid);
+  --cur_conn_num_;
+}
+```
+
 ## Options
+
+配置项
 
 ### BindInfo
 
@@ -446,5 +626,20 @@ struct BindInfo {
 
   // 数据发送完成后的回调
   MessageWriteDoneFunction msg_writedone_function = nullptr;
+};
+```
+
+### BindAdapter::Options
+
+```cpp
+class BindAdapter {
+ public:
+  struct Options {
+    uint16_t thread_id;
+    ThreadModel* thread_model;
+    IoModel* io_model;
+    BindInfo bind_info;
+    ServerTransportImpl* server_transport;
+  };
 };
 ```
