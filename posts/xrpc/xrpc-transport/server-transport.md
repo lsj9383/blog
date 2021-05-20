@@ -319,6 +319,125 @@ void ServerTransportImpl::SendMsg(STransportRspMsg* msg) {
 
 ### ServerTransport Initial
 
+ServiceTransport 的初始化交给了 ServiceAdapter 完成。
+
+Xrpc Server 支持同时存在多个 Service，每个 Service 有自己的监听端口，并且一个 ServiceAdapter 就代表了一个 Service，自然每个 ServiceAdapter 会拥有一个 ServiceTransport 进行监听以及接收数据并处理：
+
+```cpp
+int XrpcServer::Initialize() {
+  // 初始化业务service
+  InitializeServiceAdapter();
+
+  // ... 心跳和统计配置
+  return 0;
+}
+
+void XrpcServer::InitializeServiceAdapter() {
+  // 根据框架配置中 server 配置中的 service 配置信息，初始化 service 的相关信息
+  auto service_it = server_config_.services_config.begin();
+  while (service_it != server_config_.services_config.end()) {
+    ServiceAdapterOption option;
+    option.service_name = (*service_it).service_name;
+    option.socket_type = (*service_it).socket_type;
+    option.network = (*service_it).network;
+    option.ip = (*service_it).ip;
+    option.is_ipv6 = (option.ip.find(':') != std::string::npos);
+    option.port = (*service_it).port;
+    option.unix_path = (*service_it).unix_path;
+    option.protocol = (*service_it).protocol;
+    option.queue_timeout = (*service_it).queue_timeout;
+    option.idle_time = (*service_it).idle_time;
+    option.timeout = (*service_it).timeout;
+    option.disable_request_timeout = (*service_it).disable_request_timeout;
+    option.max_conn_num = (*service_it).max_conn_num;
+    option.max_packet_size =
+        ((*service_it).max_packet_size > 0) ? (*service_it).max_packet_size : 10000000;
+    option.recv_buffer_size =
+        ((*service_it).recv_buffer_size > 0) ? (*service_it).recv_buffer_size : 8192;
+    option.merge_send_data_size =
+        ((*service_it).merge_send_data_size > 0) ? (*service_it).merge_send_data_size : 8192;
+    option.transport_plugin_name = (*service_it).transport_plugin_name;
+    option.threadmodel_type = (*service_it).threadmodel_type;
+    option.threadmodel_instance_name = (*service_it).threadmodel_instance_name;
+    option.accept_thread_num = (*service_it).accept_thread_num;
+    // Set SSL/TLS config for server
+    option.ssl_config = service_it->ssl_config;
+
+    ServiceAdapterPtr service_adapter(new ServiceAdapter(option));
+    service_adapters_[(*service_it).service_name] = service_adapter;
+    ++service_it;
+  }
+}
+
+// 注册 Service 的时候会去初始化 ServerTransport
+void XrpcServer::RegistryService(const std::string &service_name, ServicePtr &service) {
+  auto service_adapter_it = service_adapters_.find(service_name);
+  if (service_adapter_it != service_adapters_.end()) {
+    service_adapter_it->second->SetService(service);
+    service->SetAdapter(service_adapter_it->second.get());
+  }
+}
+
+void ServiceAdapter::SetService(const ServicePtr& service) {
+  service_ = service;
+
+  xrpc::BindInfo bind_info;
+  bind_info.socket_type = option_.socket_type;
+  bind_info.ip = option_.ip;
+  bind_info.is_ipv6 = option_.is_ipv6;
+  bind_info.port = option_.port;
+  bind_info.network = option_.network;
+  bind_info.unix_path = option_.unix_path;
+  bind_info.protocol = option_.protocol;
+  bind_info.idle_time = option_.idle_time;
+  bind_info.max_conn_num = option_.max_conn_num;
+  bind_info.max_packet_size = option_.max_packet_size;
+  bind_info.recv_buffer_size = option_.recv_buffer_size;
+  bind_info.merge_send_data_size = option_.merge_send_data_size;
+
+  bind_info.accept_thread_num = option_.accept_thread_num;
+
+  bind_info.accept_function = service_->GetAcceptConnectionFunction();
+  bind_info.conn_establish_function = service_->GetConnectionEstablishFunction();
+  bind_info.conn_close_function = service_->GetConnectionCloseFunction();
+  bind_info.msg_writedone_function = service_->GetMessageWriteDoneFunction();
+  bind_info.checker_function = service_->GetProtocalCheckerFunction();
+  bind_info.msg_handle_function = service_->GetMessageHandleFunction();
+
+  if (!bind_info.checker_function) {
+    bind_info.checker_function = std::bind(&ServerCodec::ZeroCopyCheck, server_codec_.get(),
+                                           std::placeholders::_1,
+                                           std::placeholders::_2,
+                                           std::placeholders::_3);
+  }
+
+  if (!bind_info.msg_handle_function) {
+    bind_info.msg_handle_function = std::bind(&ServiceAdapter::HandleFiberMessage, this,
+                                              std::placeholders::_1,
+                                              std::placeholders::_2);
+  }
+
+  xrpc::ServerTransportImpl::Options options;
+  options.thread_model_ = threadmodel_;
+  transport_ = std::make_unique<ServerTransportImpl>(options);
+  transport_->Bind(bind_info);
+}
+```
+
+在初始化后，可以调用 Xrpc Server 的 Start 接口开始监听：
+
+```cpp
+void XrpcServer::Start() {
+  for (const auto &iter : service_adapters_) {
+    iter.second->Listen();
+  }
+}
+
+void ServiceAdapter::Listen() {
+  transport_->Listen();
+}
+```
+
 ## BindAdapter
 
 BindAdapter 是为每个 Reactor IO 线程提供监听 Socket 实现的重要类：
