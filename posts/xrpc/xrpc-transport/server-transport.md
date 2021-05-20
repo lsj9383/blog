@@ -201,7 +201,7 @@ class Connection {
 
 ## Sequence Diagram
 
-这里显示 Xrpc Server 如何监听并构造一个连。
+这里显示 Xrpc Server 如何监听并构造一个连接，以及如何接收数据。
 
 ### Server Transport Listen
 
