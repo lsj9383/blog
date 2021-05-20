@@ -7,6 +7,9 @@
     - [Quick Start](#quick-start)
     - [UML Class Diagram](#uml-class-diagram)
     - [Sequence Diagram](#sequence-diagram)
+        - [Server Transport Listen](#server-transport-listen)
+        - [Server Transport Accept Connection](#server-transport-accept-connection)
+        - [Server Transport Receive Data](#server-transport-receive-data)
     - [ServerTransport](#servertransport)
         - [ServerTransport Bind](#servertransport-bind)
         - [ServerTransport Listen](#servertransport-listen)
@@ -198,7 +201,9 @@ class Connection {
 
 ## Sequence Diagram
 
-这里显示 Xrpc Server 如何监听并构造一个连接：
+这里显示 Xrpc Server 如何监听并构造一个连。
+
+### Server Transport Listen
 
 ```mermaid
 sequenceDiagram
@@ -207,18 +212,20 @@ autonumber
 participant main as Main
 participant server_transport as ServerTransport
 participant bind_adapter as BindAdapter
+participant io_thread_queue as IO Thread Queue
+participant io_thread as IO Thread
 participant acceptor as Acceptor
-participant connection_manager as ConnectionManager
-participant connection as Connection
 
 rect rgb(0, 255, 255, .1)
-  Note left of main: 开始监听
+  Note left of main: 准备监听
   main ->> server_transport: 创建 ServerTransport
   server_transport -->> main: 返回 ServerTransport 实例
   main ->> main: 构造 BindInfo，其中包含需要监听的 IP 和端口、使用的协议等
   main ->> server_transport: Bind(bind_info)
   loop 为多个 IO 线程创建 BindAdapter（线程数由配置 BindInfo.accept_thread_num 决定）
     server_transport ->> bind_adapter: 构造 BindAdapter
+    bind_adapter ->> acceptor: 创建 Acceptor 实例
+    acceptor -->> bind_adapter: 返回 Acceptor 实例
     bind_adapter -->> server_transport: 返回 BindAdapter 实例
   end
   server_transport -->> main: 返回
@@ -226,32 +233,91 @@ rect rgb(0, 255, 255, .1)
   main ->> server_transport: Listen 开始监听连接请求
   loop 遍历所有的 BindAdapter:
     server_transport ->> bind_adapter: Listen
-    bind_adapter ->> acceptor: 在相应的 IO Thread 的 Reactor 上开启监听
-    acceptor -->> bind_adapter: 返回
+    bind_adapter ->> io_thread_queue: 构造监听任务提交到 IO Thread
+    io_thread_queue -->> bind_adapter: 返回
     bind_adapter -->> server_transport: 返回
   end
   server_transport -->> main: 返回
 end
 
 rect rgba(0, 255, 0, .1)
-  Note left of main: 接收到新连接
-  acceptor ->> acceptor: 感知到新建连接事件，由 Reactor 感知并通知
-  acceptor ->> acceptor: Accept 连接，并构造 AcceptConnectionInfo
-  acceptor ->> server_transport: AcceptConnection
-  server_transport ->> server_transport: 创建 Connection
-  server_transport ->> connection_manager: 将 Connection 交给 ConnectionManager 管理
-  connection_manager -->> server_transport: 返回
-  server_transport -->> acceptor: 完成
+  Note left of main: 处理监听任务
+  io_thread -> io_thread_queue: 获取监听 Task
+  io_thread_queue -->> io_thread: 返回监听 Task
+  io_thread ->> acceptor: 开启监听
+  acceptor -->> io_thread: 返回
+end
+```
+
+### Server Transport Accept Connection
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant io_thread as IO Thread
+participant io_thread_queue as IO Thread Queue
+participant server_transport as ServerTransport
+participant bind_adapter as BindAdapter
+participant acceptor as Acceptor
+participant connection_manager as ConnectionManager
+participant connection as Connection
+
+
+rect rgba(0, 255, 0, .1)
+  Note left of io_thread: 接收到 Accept 事件
+  io_thread ->> io_thread: 通过 Reactor 感知到 Accept 事件
+  io_thread ->> acceptor: 处理 Acceptor 事件
+  acceptor ->> acceptor: accept 一个连接，并构造 AcceptConnectionInfo
+  acceptor ->> bind_adapter: 通过 options.accept_handler 调用 AcceptConnection()
+  bind_adapter ->> bind_adapter: 触发回调 【bind_info.accept_function】
+  bind_adapter ->> bind_adapter: 选择一个 IO 线程来处理该连接的网络事件
+  bind_adapter ->> io_thread_queue: 向指定的 IO 线程提交连接构造任务
+  io_thread_queue -->> bind_adapter: 返回
+  bind_adapter -->> acceptor: 返回
+  acceptor -->> io_thread: 返回
 end
 
-rect rgba(255, 255, 0, .1)
-  Note left of main: 连接关闭
-  connection ->> connection: 感知到连接关闭事件，由 Reactor 感知并通知
-  connection ->> bind_adapter: CleanConnection 清理连接
-  bind_adapter ->> connection_manager: 剔除连接
-  bind_adapter ->> bind_adapter: 清理连接内存
-  bind_adapter --> connection: 返回
+rect rgba(25, 0, 250, .1)
+  Note left of io_thread: 构造连接
+  io_thread -> io_thread_queue: 获取连接构造 Task
+  io_thread_queue -->> io_thread: 返回连接构造 Task
+  io_thread ->> connection: 构造 TcpConnection
+  connection -->> io_thread: 返回 TcpConnection 实例
+  io_thread ->> connection_manager: 将新连接添加到 Manager
+  connection_manager -->> io_thread: 返回
+  io_thread ->> connection: Established() 通知连接建立完成
+  connection --> io_thread: 返回
 end
+```
+
+### Server Transport Receive Data
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant io_thread as IO Thread
+participant connection as Connection
+participant connection_handler as DefaultConnectionHandler
+
+
+Note left of io_thread: 接收到数据
+io_thread ->> io_thread: 通过 Reactor 感知可读事件
+io_thread ->> connection: 处理可读事件
+
+connection ->> connection: 读取数据到缓冲区
+connection ->> connection_handler: MessageCheck() 消息完整性检查
+connection_handler ->> connection_handler: 触发事件 【bind_info.checker_function】进行消息检查
+connection_handler -->> connection: 返回
+alt 消息不完整
+  connection -->> io_thread: 返回
+end
+
+connection ->> connection_handler: MessageHandle() 处理消息
+connection_handler ->> connection_handler: 触发事件 【bind_info.msg_handle_function】进行消息处理
+connection_handler -->> connection: 返回
+connection -->> io_thread: 返回
 ```
 
 ## ServerTransport
