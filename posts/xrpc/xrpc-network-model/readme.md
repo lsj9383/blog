@@ -39,77 +39,6 @@ Xrpc Network Model 是运行在 Thread Model 的 IO Thread 上的，所有的网
 
 我们通过两个示例来快速理解 Xrpc 的网络模型以及其对外暴露的接口。在实际 Xrpc 网络编程中，往往并不会直接使用网络模型的接口，而是使用 Xrpc 封装的 Transport 接口。
 
-```cpp
-void Test() {
-  xrpc::ServerTransportImpl::Options server_transport_options;
-  server_transport_options.thread_model_ = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
-  xrpc::ServerTransportImpl server_transport(server_transport_options);
-
-  // 构造 BindInfo
-  xrpc::BindInfo info;
-  info.is_ipv6 = false;
-  info.socket_type = "net";
-  info.ip = "0.0.0.0";
-  info.port = 8899;
-  info.network = "tcp";
-
-  // 触发 Accept 回调，返回值决定了使用哪个 IO 线程的 Reactor 处理连接事件
-  info.accept_function = [](const xrpc::AcceptConnectionInfo &info) {
-    std::cout << "Accept Event..." << std::endl;
-    return 0;
-  };
-
-  // 检查 Connection 收到的数据是否为一个完整的包
-  info.checker_function = [](const xrpc::ConnectionPtr& conn, xrpc::NoncontiguousBuffer& in,
-                             std::deque<std::any>& out) {
-    std::cout << "Checker Event..." << std::endl;
-    out.push_back(in);
-    in.Clear();
-    return xrpc::PacketChecker::PACKET_FULL;
-  };
-
-  // 对所接收到数据的处理
-  info.msg_handle_function = [&server_transport](const xrpc::ConnectionPtr& conn,
-                                                 std::deque<std::any>& msg) {
-    std::cout << "Msg Handle Event..." << std::endl;
-
-    auto it = msg.begin();
-    while (it != msg.end()) {
-      auto& buff = std::any_cast<xrpc::NoncontiguousBuffer&>(*it);
-
-      // 构造响应
-      xrpc::STransportRspMsg* rsp = new xrpc::STransportRspMsg();
-      rsp->basic_info = xrpc::object_pool::GetRefCounted<xrpc::BasicInfo>();
-      rsp->basic_info->connection_id = conn->GetConnId();
-      rsp->basic_info->addr.ip = conn->GetPeerIp();
-      rsp->basic_info->addr.port = conn->GetPeerPort();
-      rsp->send_data = buff;
-
-      server_transport.SendMsg(rsp);
-      ++it;
-    }
-
-    return true;
-  };
-
-  // Listen
-  server_transport.Bind(info);
-  server_transport.Listen();
-
-  // sleep
-  auto promise = xrpc::Promise<bool>();
-  auto fut = promise.get_future();
-  fut.Wait();
-}
-
-int main() {
-  xrpc::XrpcConfig::GetInstance()->Init("test_transport_server.yaml");
-  xrpc::XrpcPlugin::GetInstance()->InitThreadModel();
-  Test();
-  xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
-}
-```
-
 ### Client Dmoe
 
 我们通过一个使用 Xrpc 的 Network Model 的接口来构造一个 HTTP 请求和响应来理解 Xrpc Client 的工作流程。
@@ -190,15 +119,6 @@ class TestClientConnectionHandler : public xrpc::ConnectionHandler {
   void ConnectionClosed(const xrpc::ConnectionPtr& conn) override {
     std::cout << "ConnectionClosed" << std::endl;
     conn->DoClose(true);
-  }
-
-  // 连接关闭完成后的回调，可能会对连接做一些清理、释放内存的工作
-  void ConnectionClean(const xrpc::ConnectionPtr& conn) override {
-    std::cout << "ConnectionClean" << std::endl;
-
-    auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
-    auto reactor = thread_model->GetIOThread(0)->GetIoModel()->GetReactor();
-    reactor->SubmitTask([conn] { delete conn; });
   }
 
   // 发送完数据调用
@@ -292,7 +212,6 @@ ok
 =====================================
 Close ...
 ConnectionClosed
-ConnectionClean
 ```
 
 ### Server Demo
@@ -679,12 +598,14 @@ participant epoll as Epoll
 
 user ->> tcp_conn: Send 发送数据
 
+tcp_conn ->> tcp_conn: 队列中换成需要发送的数据
+
 alt state_ == kConnecting
-  tcp_conn ->> tcp_conn: HandleWriteEvent 主动触发写事件处理
+  tcp_conn ->> tcp_conn: HandleWriteEvent()，会检查连接是否已经建立，若建立了，则直接发送数据
 end
 
-alt 发送数据队列满
-  tcp_conn ->> tcp_conn: HandleWriteEvent 主动触发写事件处理
+alt 发送队列数据超过阈值
+  tcp_conn ->> tcp_conn: HandleWriteEvent()，会检查连接是否已经建立，若建立了，则直接发送数据
 end
 
 alt need_direct_write_ == true 可以直接发送数据
@@ -799,10 +720,15 @@ loop reactor 的 epoll 循环
     end
   end
 
-  loop !io_msgs.empty()
+  loop 发送队列数据不为空
     tcp_conn ->> io_handler: 发送数据 Writev
     io_handler -->> tcp_conn: 响应
+    alt 发送缓冲区满
+      tcp_conn ->> tcp_conn: break
+    end
   end
+
+  tcp_conn -> tcp_conn: 将以发送的数据从队列中剔除
 
   tcp_conn ->> conn_handler: ConnectionTimeUpdate 连接保活通知
   conn_handler -->> tcp_conn: 完成

@@ -44,8 +44,73 @@ Server Transport 的主要职责是：
 我们通过构造使用 Server Transport 构造一个 TCP Echo Server 来简述 Server Transport 的接口和基本理念。
 
 ```cpp
-int main(void) {
-  return 0;
+void Test() {
+  xrpc::ServerTransportImpl::Options server_transport_options;
+  server_transport_options.thread_model_ = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
+  xrpc::ServerTransportImpl server_transport(server_transport_options);
+
+  // 构造 BindInfo
+  xrpc::BindInfo info;
+  info.is_ipv6 = false;
+  info.socket_type = "net";
+  info.ip = "0.0.0.0";
+  info.port = 8899;
+  info.network = "tcp";
+
+  // 触发 Accept 回调，返回值决定了使用哪个 IO 线程的 Reactor 处理连接事件
+  info.accept_function = [](const xrpc::AcceptConnectionInfo &info) {
+    std::cout << "Accept Event..." << std::endl;
+    return 0;
+  };
+
+  // 检查 Connection 收到的数据是否为一个完整的包
+  info.checker_function = [](const xrpc::ConnectionPtr& conn, xrpc::NoncontiguousBuffer& in,
+                             std::deque<std::any>& out) {
+    std::cout << "Checker Event..." << std::endl;
+    out.push_back(in);
+    in.Clear();
+    return xrpc::PacketChecker::PACKET_FULL;
+  };
+
+  // 对所接收到数据的处理
+  info.msg_handle_function = [&server_transport](const xrpc::ConnectionPtr& conn,
+                                                 std::deque<std::any>& msg) {
+    std::cout << "Msg Handle Event..." << std::endl;
+
+    auto it = msg.begin();
+    while (it != msg.end()) {
+      auto& buff = std::any_cast<xrpc::NoncontiguousBuffer&>(*it);
+
+      // 构造响应
+      xrpc::STransportRspMsg* rsp = new xrpc::STransportRspMsg();
+      rsp->basic_info = xrpc::object_pool::GetRefCounted<xrpc::BasicInfo>();
+      rsp->basic_info->connection_id = conn->GetConnId();
+      rsp->basic_info->addr.ip = conn->GetPeerIp();
+      rsp->basic_info->addr.port = conn->GetPeerPort();
+      rsp->send_data = buff;
+
+      server_transport.SendMsg(rsp);
+      ++it;
+    }
+
+    return true;
+  };
+
+  // Listen
+  server_transport.Bind(info);
+  server_transport.Listen();
+
+  // sleep
+  auto promise = xrpc::Promise<bool>();
+  auto fut = promise.get_future();
+  fut.Wait();
+}
+
+int main() {
+  xrpc::XrpcConfig::GetInstance()->Init("test_transport_server.yaml");
+  xrpc::XrpcPlugin::GetInstance()->InitThreadModel();
+  Test();
+  xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
 }
 ```
 
