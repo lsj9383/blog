@@ -315,9 +315,9 @@ https://oauth.authorization.endpoint.com/oauth/v1/authorize?client_id=xxx&respon
 
 ### Credential Leakage via Browser History
 
-code 和 Access Token 可能出现在浏览器访问过的 URL 历史中。
+授权码 code 和 Access Token 可能出现在浏览器访问过的 URL 历史中。
 
-当浏览器由 AS 的重定向响应导航至 `client.example/redirection_endpoint?code=abcd`，则授权码 code 会出现在浏览器历史记录中，拥有访问该设备权限的 Attacker 可以获取到该 code。应对策略主要是：
+当浏览器由 AS 的重定向响应导航至 `client.example/redirection_endpoint?code=abcd`，则授权码 code 会出现在浏览器历史记录中，拥有访问该设备权限的 Attacker 可以获取到该 code。应对策略：
 
 - 避免 code 重放攻击。
 - 使用 `post response mode`，避免 URL 中存在相关参数。
@@ -464,9 +464,9 @@ participant client as Client
 participant authz_server as OAuth Authorization Server
 
 attacker ->> attacker: 先获取一个授权码 attacker-code
-attacker ->> attacker: 构造一个页面，且该页面会自动发送 client_redirect_uri?code=attacker-code&attacker-state 的请求
+attacker ->> attacker: 构造一个页面，且该页面会自动发送 client_redirect_uri?code=attacker-code&state=attacker-state 的请求
 attacker ->> user_browser: 通过某种方式，User 获得了 Attacker 的页面，加载 attacker 页面
-user_browser ->> client: client_redirect_uri?code=attacker-code&attacker-state
+user_browser ->> client: client_redirect_uri?code=attacker-code&state=attacker-state
 client -> authz_server: Token?code=attacker-code
 authz_server -->> client: 返回 attacker-token
 client -->> user_browser: 登录 attacker 账号，并建立会话
@@ -649,6 +649,30 @@ Client 一定不能暴露 Open Redirector。Attacker 可能使用 Open Redirecto
 对于 AS，其提供的授权页面通常要求用户输入自己的账号密码凭证，并发送 POST 请求进行登录，并由 AS 进行认证后向 Client 发送重定向请求以此为 Client 授权。
 
 HTTP 状态码 302 通常用于此重定向，但 OAuth2.0 允许 `any other method available via the user-agent to accomplish this redirection is allowed`，此时需要对 307 重定向有所警惕。
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant user as User Browser
+participant client as Attacker Client
+participant authz_server as OAuth Authorization Server
+
+user ->> client: 登录
+client -->> user: 302 Location: Authorize
+user ->> authz_server: Authorize
+authz_server --> user: 返回授权页面
+user ->> user: 输入账号密码
+
+rect rgb(255, 0, 0, .3)
+    Note right of user: Post 带上 BODY，AS 通过 307 进行重定向会把 BODY 再带给 Client
+    user -> authz_server: POST: authN & BODY(user=xx, pwd=yy)
+    authz_server -->> user: 307 Location: client_redirect_uri?code=user-code
+    user ->> client: POST client_redirect_uri?code=user-code & BODY(user=xx, pwd=yy)
+end
+client ->> client: 获得用户的用户名和密码
+client -->> user: 返回
+```
 
 这是因为 307 重定向不会修改原始请求的 Method 和 Body，这可能导致将用户的账号密码发给 Client。进一步，如果 Client 是 Attacker 申请的合法 Client，诱导用户进行 OAuth 登录，这将导致用户的账号密码泄露给了 Attacker。
 
