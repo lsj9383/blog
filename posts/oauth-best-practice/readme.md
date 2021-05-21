@@ -12,7 +12,7 @@
         - [Resource Owner Password Credentials Grant](#resource-owner-password-credentials-grant)
         - [Client Authentication](#client-authentication)
         - [Other Recommendations](#other-recommendations)
-    - [The Updated OAuth 2.0 Attacker Model](#the-updated-oauth-20-attacker-model)
+    - [The OAuth 2.0 Attacker Model](#the-oauth-20-attacker-model)
     - [Attacks and Mitigation](#attacks-and-mitigation)
         - [Insufficient Redirect URI Validation](#insufficient-redirect-uri-validation)
         - [Credential Leakage via Referer Headers](#credential-leakage-via-referer-headers)
@@ -69,7 +69,7 @@ Authorization servers 应该尽可能的去验证 Client 的身份。
 
 ### Other Recommendations
 
-## The Updated OAuth 2.0 Attacker Model
+## The OAuth 2.0 Attacker Model
 
 攻击者模型描述了可能存在的攻击者。
 
@@ -88,6 +88,94 @@ A5 | 攻击者可以获得 AS 颁发的访问令牌。
 ### Insufficient Redirect URI Validation
 
 重定向 URI 验证不足。
+
+某些 AS 服务器允许 Client 注册重定向 URI Pattern（例如正则表达式），而不是完整的重定向 URI。AS 在收到 Authorize 请求时会将 redirect_uri 参数与注册的 Redirect URI Pattern 进行匹配。这种方式的好处是允许 Client 将一些 runtime 参数放到 redirect_uri 中，一个注册可以使用多个不同的 redirect_uri。
+
+与精确匹配相比，这种方式实现更加复杂，并且易于引入错误。重定向 URI 验证不足，可能使得对 Client 的认证不充分，并导致 Attacker 获取授权码 Code 甚至 Access Token。
+
+**授权码流程的重定向 URI 验证攻击**
+
+对于使用授权码流程的 Client，可能会遭受如下攻击：
+
+1. Client 注册了 Redirect URI Pattern: `https://*.somesite.example/*`，目的是允许所有的 `.somesite.example` 子域名 URI 都是 Client 有效的 Redirect URI。
+1. AS 愚蠢的没有对域名中的 `*` 进行限制，而是理解成任意字符串，进而 AS 可能会认为 `https://attacker.example/.somesite.example` 这是一个有效的重定向 URI。
+1. Attacker 可能进行如下攻击：
+   1. Attacker 诱惑用户打开其特制的页面：`https://www.evil.example`。
+   1. 该 URL 向 AS 发起授权请求，并且使用的 Client ID 来自于合法的 Client。
+
+    ```text
+    GET /authorize?response_type=code&client_id=s6BhdRkqt3&state=9ad67f13
+        &redirect_uri=https%3A%2F%2Fattacker.example%2F.somesite.example HTTP/1.1
+    Host: server.somesite.example
+    ```
+
+    1. 用户会看到由 AS 下发的授权页面，并且该页面显示为合法的且用户已知的 Client 授权。用户不认识重定向 URI，也无法感知到重定向 URI 指向 Attacker。
+    1. 用户授权后，Attacker 会拿到授权码 code。
+
+对于 Public Client，Attacker 将会直接拿到用户的 Token。
+
+对于 Confidential Client，Attacker 会进一步使用 Code 注入攻击，请参考 [Authorization Code Injection](#authorization-code-injection)。
+
+即便是 AS 限制了域名中的 `*` 只能匹配域名，其实仍然可能存在问题：
+
+>  If an attacker manages to establish a host or subdomain in somesite.example, he can impersonate the legitimate client. This could be caused, for example, by a subdomain takeover attack subdomaintakeover, where an outdated CNAME record (say, external-service.somesite.example) points to an external DNS name that does no longer exist (say, customer-abc.service.example) and can be taken over by an attacker (e.g., by registering as customer-abc with the external service).
+
+**隐式流程的重定向 URI 验证攻击**
+
+上述攻击同样适用于隐式流程，即如果 Attacker 可以使得授权响应发送到 Attacker 控制的 URI，则 Attacker 可以从 Fragment 中拿到 Access Token。
+
+对于隐式流程，用户则可能会进一步受到攻击，该攻击依赖于一个事实和一个前提：
+
+- 一个事实：如果重定向的 Location 中不包含 Fragment，则会使用原始请求中的 Fragment。
+- 一个前提，Client 是一个 Open Redirector，请参考 [Open Redirection](#open-redirection)。
+  - 即 Client 公开了一个 Redirector，可以允许重定向到任何 URL。
+  - 例如 Client 允许 `https://client.somesite.example/cb?redirect_to=https://attacker.example/cb` 重定向到 `https://attacker.example/cb`。
+
+攻击流程 如下：
+
+1. Client 注册的 Redirect URL Pattern 是 `https://client.somesite.example/cb?*`。
+1. Attacker 诱惑用户打开其特制的页面：`https://www.evil.example`。
+1. 该 URL 向 AS 发起授权请求，并且使用的 Client ID 来自于合法的 Client。
+
+   ```text
+   GET /authorize?response_type=token&state=9ad67f13
+        &client_id=s6BhdRkqt3
+        &redirect_uri=https%3A%2F%2Fclient.somesite.example
+                      %2Fcb%26redirect_to%253Dhttps%253A%252F%252Fattacker.example%252F HTTP/1.1
+   Host: server.somesite.example
+   ```
+
+1. AS 在进行授权请求校验后，将 Access Token 重定向至 Redirect URI：
+
+   ```text
+   HTTP/1.1 303 See Other
+   Location: https://client.somesite.example/cb?
+               redirect_to%3Dhttps%3A%2F%2Fattacker.example%2Fcb
+               #access_token=2YotnFZFEjr1zCsicMWpAA&...
+   ```
+
+1. 因为 Open Redirector 的存在，Client 进一步重定向：
+
+   ```text
+   HTTP/1.1 303 See Other
+   Location: https://attacker.example/
+   ```
+
+1. 因为 Location 中没有包含 Fragment，这导致使用原始请求中的 Fragment，所以实际的重定向请求是：
+
+   ```text
+   https://attacker.example/#access_token=2YotnFZFEjr1z..
+   ```
+
+1. 最终 Attacker 拿到了用户的 Access Token。
+
+
+**应对措施**
+
+- 首要建议是使用精确的 Redirect URI 匹配来避免这些问题，避免可能存在的异常场景。
+- 接收 OAuth 重定向请求的 Redirect URI 一定不能提供 Redirector。
+- Client 在重定向时，可以使用任意 Fragment 来屏蔽掉原始请求的 Fragment，例如 `#_`。
+- Client 应该使用授权码流程，而非 Implicit Flow。
 
 ### Credential Leakage via Referer Headers
 
@@ -268,6 +356,30 @@ code_verifier 通常会和 User Agent 会话绑定，因此第一步是必然的
 ### Access Token Leakage at the Resource Server
 
 ### Open Redirection
+
+若 AS 或 Client 支持 Open Redirector 时，会潜藏着被攻击的可能。
+
+Open Redirector 可以将用户 User Agent 转发到从查询字符串参数中获得的任意 URI 端点。
+
+**Client 是一个 Open Redirector**
+
+Client 一定不能暴露 Open Redirector。Attacker 可能使用 Open Redirector 机制生成一个 Client 的合法 URL，但是会被 Client 重定向到 Attacker 的 URL，这会导致：
+
+- Attacker 利用这个方式拿到 Implicit Flow 下的 Access Token，请参考 [Insufficient Redirect URI Validation](#insufficient-redirect-uri-validation)。
+- 用户看到是 Client 的 URL 会信任，Attacker 可以用其进行钓鱼。
+
+
+若 Client 必须要提供这样的能力，必须对 Redirect URL 参数进行白名单筛选。
+
+**AS 是一个 Open Redirector**
+
+与 Client 类似，Attacker 可能利用首用户信任的 AS 进行用户钓鱼。
+
+应该允许 AS 重定向 User Agent 到另外一个网站（OAuth Client），但是这必须以安全的方式： 对于错误的 client_id 和 Redirect URL 组合是一定不能重定向的。
+
+然而，Attacker 可以自己申请一个合法 Client，并且构造一个 URL 引导用户访问，该 URL 会发起授权请求，且始终用一个错误的 scope，从而让 AS 将 User Agent 重定向到网络钓鱼站点。
+
+对于这样的情况，最好不允许任何错误的请求重定向至 Redirect URL，而是由 AS 的错误页面告知用户错误原因。
 
 ### 307 Redirect
 
