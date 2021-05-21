@@ -115,6 +115,36 @@ Authorization servers 应该尽可能的去验证 Client 的身份。
 
 推荐的方式是采用非对称密钥（基于公钥），例如 [mTLS](https://www.rfc-editor.org/rfc/rfc8705.html) 和 [private_key_jwt](https://openid.net/specs/openid-connect-core-1_0.html#ClientAuthentication)。
 
+这是一个非标准流程，一种简单的 Client 认证方式：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant client as Client
+participant authz_server as OAuth Authorization Server
+
+rect rgb(0, 255, 0, .1)
+    Note left of client: 注册 Client
+    client ->> client: 生成公私钥 pub & pri
+    client ->> authz_server: 注册 Client，并提交自己的 pub
+end
+
+rect rgb(255, 255, 0, .1)
+    Note left of client: Client 得到用户授权码
+    client ->> authz_server: Authorize 请求 code
+    authz_server -->> client: 返回 code
+end
+
+rect rgb(255, 0, 0, .1)
+    Note left of client: Token 请求认证 Client
+    client ->> client: 生成随机数 random, 并使用 pri 加密得到 enc_random
+    client ->> authz_server: Token?client_id=x&random&enc_random
+    authz_server ->> authz_server: 使用 pub 解开 enc_random 得到 random_，比较 random 和 random_
+    authz_server -->> client: 返回 Access Token
+end
+```
+
 ### Other Recommendations
 
 [OAuth Metadata](https://www.rfc-editor.org/rfc/rfc8414.html) 的使用可能会帮助提升 OAuth 部署时的安全性：
