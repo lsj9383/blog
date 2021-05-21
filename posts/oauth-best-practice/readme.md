@@ -271,7 +271,34 @@ code_verifier 通常会和 User Agent 会话绑定，因此第一步是必然的
 
 ### 307 Redirect
 
+对于 AS，其提供的授权页面通常要求用户输入自己的账号密码凭证，并发送 POST 请求进行登录，并由 AS 进行认证后向 Client 发送重定向请求以此为 Client 授权。
+
+HTTP 状态码 302 通常用于此重定向，但 OAuth2.0 允许 `any other method available via the user-agent to accomplish this redirection is allowed`，此时需要对 307 重定向有所警惕。
+
+这是因为 307 重定向不会修改原始请求的 Method 和 Body，这可能导致将用户的账号密码发给 Client。进一步，如果 Client 是 Attacker 申请的合法 Client，诱导用户进行 OAuth 登录，这将导致用户的账号密码泄露给了 Attacker。
+
+在 HTTP 标准中，只有 303 明确要求浏览器将 HTTP POST 重写为 HTTP GET，包括流行的 302 重定向也没有明确指定该行为（虽然绝大部分浏览器对于非 307 的重定向都会 POST 转 GET）。
+
+因此 AS 实现时，一定不能使用 307 进行重定向，而是应该尽量使用 303 重定向。
+
 ### TLS Terminating Reverse Proxies
+
+TLS 终止的反向代理，这属于 HTTPS 的常见部署体系：
+
+- Client 通常隐藏在反向代理后面。
+- 反向代理处会终止 TLS，向 Client 转发信息使用 HTTP。
+
+如果 Attacker 可以访问反向代理和 Client 所在的网络，一定要思考如何保护反向代理和 Client 之间的通信连接，以防止消息的窃听、注入和重放。
+
+```mermaid
+graph LR
+
+A[User Agent] -- HTTPS --> B[Reverse Proxies]
+B -- HTTP --> C{Client}
+
+D[Attacker] -.-> B
+D -.-> C
+```
 
 ### Refresh Token Protection
 
