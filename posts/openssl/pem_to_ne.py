@@ -15,8 +15,11 @@ def parse_args():
 
 def n_e_from_pem(pem):
     p = load_pem_public_key(pem)
-    n = base64.urlsafe_b64encode(p.public_numbers().n.to_bytes(256, byteorder='big'))
-    e = base64.urlsafe_b64encode(p.public_numbers().e.to_bytes(3, byteorder='big'))
+    int_n = p.public_numbers().n
+    int_e = p.public_numbers().e
+
+    n = base64.urlsafe_b64encode(int_n.to_bytes((int_n.bit_length() + 7) // 8, byteorder='big'))
+    e = base64.urlsafe_b64encode(int_e.to_bytes((int_e.bit_length() + 7) // 8, byteorder='big'))
     return n, e
 
 
