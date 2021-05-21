@@ -349,6 +349,30 @@ code 和 Access Token 可能出现在浏览器访问过的 URL 历史中。
 1. 合法客户端向 AS 发起 Token 请求，拿到 Access Token。
 1. 最终导致 Attacker 与合法客户端的会话关联到了受害者的资源上（关联到受害者的 Access Token，并可以获得受害者资源）。
 
+```mermaid
+sequenceDiagram
+
+participant attacker as Attacker
+participant attacker_browser as Attacker Browser
+participant client as Client
+participant authz_server as OAuth Authorization Server
+
+attacker ->> attacker: 通过技术窃取用户 user-code
+attacker_browser ->> client: 登录
+client -->> attacker_browser: 重定向至 AS 并设置会话 cookie(state=a)
+attacker_browser ->> authz_server: Authorize?state=a
+authz_server -->> attacker_browser: 302 Location: redirect_uri?code=attacker-code&state=a
+rect rgb(255, 0, 0, .3)
+    Note right of attacker: 替换 code
+    attacker_browser ->> attacker_browser: 中断重定向
+    attacker_browser ->> attacker: 拿 user-code
+    attacker -->> attacker_browser: 返回 user-code 并替换 code=user-code
+end
+attacker_browser ->> client: redirect_uri?code=user-code&state=a
+client ->> client: 校验 code 和 state
+client -->> attacker_browser: 认为用户登录，设置用户会话
+```
+
 **应对措施**
 
 有两个技术方案可以解决这个问题：
