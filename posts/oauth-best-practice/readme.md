@@ -40,6 +40,17 @@
 
 该文档会涵盖 OAuth2.0 最新的最佳安全实践。
 
+本文的一些术语：
+
+Term | Description
+-|-
+Client | 本文提到的 Client 若没有特殊提及，均指的是在 OAuth 注册的 Client
+AS | Authorization Server，授权服务器
+RS | Resource Server，资源服务器
+RO | Resource Owner，资源所有者
+
+其他相关术语均来自 [The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749.html)。
+
 ## Recommendations
 
 这部分是 OAuth 工作小组推荐的 OAuth 实施方式，这里面涉及到的一些攻击会在 [Attacks and Mitigation](#attacks-and-mitigation) 部分提到。
@@ -71,7 +82,7 @@ AS 也必须防止 PKCE 降级攻击，请参考 [PKCE Downgrade Attack](#pkce-d
 
 Implicit Flow 相比于授权码流程更容易泄漏 Access Token，请参考 [Insufficient Redirect URI Validation](#insufficient-redirect-uri-validation)、[Credential Leakage via Referer Headers](#credential-leakage-via-referer-headers) 和 [Credential Leakage via Browser History](#credential-leakage-via-browser-history)。
 
-此外，不存在每种方式将 Implicit Flow 响应的 Access Token 和 Client 进行绑定，进而无法在 RS 上对 Access Token 进行重放攻击的防范。
+此外，不存在某种方式将 Implicit Flow 响应的 Access Token 和 Client 进行绑定，进而无法在 RS 上对 Access Token 进行重放攻击的防范。
 
 综上，应该尽量避免使用 Implicit Flow 分发 Access Token。
 
@@ -122,11 +133,11 @@ sequenceDiagram
 autonumber
 
 participant client as Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 
 rect rgb(0, 255, 0, .1)
     Note left of client: 注册 Client
-    client ->> client: 生成公私钥 pub & pri
+    client ->> client: 生成公私钥 pub and pri
     client ->> authz_server: 注册 Client，并提交自己的 pub
 end
 
@@ -139,7 +150,7 @@ end
 rect rgb(255, 0, 0, .1)
     Note left of client: Token 请求认证 Client
     client ->> client: 生成随机数 random, 并使用 pri 加密得到 enc_random
-    client ->> authz_server: Token?client_id=x&random&enc_random
+    client ->> authz_server: Token?client_id=x + random + enc_random
     authz_server ->> authz_server: 使用 pub 解开 enc_random 得到 random_，比较 random 和 random_
     authz_server -->> client: 返回 Access Token
 end
@@ -299,20 +310,20 @@ autonumber
 
 participant user_browser as User Browser
 participant client as Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 participant attacker as Attacker
 
 user_browser ->> client: 登录
 client -->> user_browser: 302 Location: Authorize?state=user-state
 user_browser ->> authz_server: Authorize?state=user-state
-authz_server -->> user_browser: 302 Location: client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state
-user_browser ->> client: client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state
+authz_server -->> user_browser: 302 Location: client_redirect_uri?code=xxxx-yyyy-zzzz + state=user-state
+user_browser ->> client: client_redirect_uri?code=xxxx-yyyy-zzzz + state=user-state
 client -->> user_browser: 返回页面
 
 rect rgb(255, 0, 0, .3)
-    Note right of user_browser: User Browser 处于 client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state 页面下
+    Note right of user_browser: User Browser 处于 client_redirect_uri?code=xxxx-yyyy-zzzz + state=user-state 页面下
     user_browser ->> user_browser: 由于某些原因，页面包含 img 等会请求 Attacker 的 URL
-    user_browser ->> attacker: 请求 & HTTP Headers referer: client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state
+    user_browser ->> attacker: 请求 + HTTP Headers referer: client_redirect_uri?code=xxxx-yyyy-zzzz + state=user-state
     attacker ->> attacker: 获得用户的 code 和 state
     attacker -->> user_browser: 返回
 end
@@ -413,20 +424,20 @@ autonumber
 participant attacker as Attacker
 participant attacker_browser as Attacker Browser
 participant client as Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 
 attacker ->> attacker: 通过技术窃取用户 user-code
 attacker_browser ->> client: 登录
 client -->> attacker_browser: 重定向至 AS 并设置会话 cookie(state=a)
 attacker_browser ->> authz_server: Authorize?state=a
-authz_server -->> attacker_browser: 302 Location: redirect_uri?code=attacker-code&state=a
+authz_server -->> attacker_browser: 302 Location: redirect_uri?code=attacker-code + state=a
 rect rgb(255, 0, 0, .3)
     Note right of attacker: 替换 code
     attacker_browser ->> attacker_browser: 中断重定向
     attacker_browser ->> attacker: 拿 user-code
     attacker -->> attacker_browser: 返回 user-code 并替换 code=user-code
 end
-attacker_browser ->> client: redirect_uri?code=user-code&state=a
+attacker_browser ->> client: redirect_uri?code=user-code + state=a
 client ->> client: 校验 state 与 cookie
 client ->> authz_server: Token?code=user-code
 authz_server -->> client: 响应 Access Token
@@ -453,18 +464,18 @@ autonumber
 
 participant attacker_browser as Attacker Browser
 participant client as Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 
 attacker_browser ->> client: 登录
 client -->> attacker_browser: 重定向至 AS 并设置会话 cookie(state=a, code_verifier=abc)
-attacker_browser ->> authz_server: Authorize?state=a&code_challenge=sha256(abc)
-authz_server -->> attacker_browser: 302 Location: redirect_uri?code=attacker-code&state=a
+attacker_browser ->> authz_server: Authorize?state=a + code_challenge=sha256(abc)
+authz_server -->> attacker_browser: 302 Location: redirect_uri?code=attacker-code + state=a
 rect rgb(255, 0, 0, .3)
     Note right of attacker_browser: code 被替换
-    attacker_browser ->> client: redirect_uri?code=user-code&state=a
+    attacker_browser ->> client: redirect_uri?code=user-code + state=a
 end
 client ->> client: 校验 state 与 cookie
-client ->> authz_server: Token?code=user-code&code_verifier=abc
+client ->> authz_server: Token?code=user-code + code_verifier=abc
 authz_server -->> client: 由于 code 和 code_verifier 不匹配返回失败
 client -->> attacker_browser: 返回失败
 ```
@@ -482,20 +493,20 @@ autonumber
 participant attacker as Attacker
 participant attacker_browser as Attacker Browser
 participant client as Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 
 attacker ->> attacker: 通过技术窃取用户 user-token
 attacker_browser ->> client: 登录
 client -->> attacker_browser: 重定向至 AS 并设置会话 cookie(state=a)
 attacker_browser ->> authz_server: Authorize?state=a
-authz_server -->> attacker_browser: 302 Location: redirect_uri?token=attacker-token&state=a
+authz_server -->> attacker_browser: 302 Location: redirect_uri?token=attacker-toke + state=a
 rect rgb(255, 0, 0, .3)
     Note right of attacker: 替换 token
     attacker_browser ->> attacker_browser: 中断重定向
     attacker_browser ->> attacker: 拿 user-token
     attacker -->> attacker_browser: 返回 user-token 并替换 token=user-token
 end
-attacker_browser ->> client: redirect_uri?code=user-token&state=a
+attacker_browser ->> client: redirect_uri?code=user-token + state=a
 client ->> client: 校验 token、state 与 cookie
 client -->> attacker_browser: 认为用户登录，设置用户会话
 ```
@@ -518,12 +529,12 @@ autonumber
 participant attacker as Attacker
 participant user_browser as User Browser
 participant client as Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 
 attacker ->> attacker: 先获取一个授权码 attacker-code
-attacker ->> attacker: 构造一个页面，且该页面会自动发送 client_redirect_uri?code=attacker-code&state=attacker-state 的请求
+attacker ->> attacker: 构造一个页面，且该页面会自动发送 client_redirect_uri?code=attacker-code + state=attacker-state 的请求
 attacker ->> user_browser: 通过某种方式，User 获得了 Attacker 的页面，加载 attacker 页面
-user_browser ->> client: client_redirect_uri?code=attacker-code&state=attacker-state
+user_browser ->> client: client_redirect_uri?code=attacker-code + state=attacker-state
 client -> authz_server: Token?code=attacker-code
 authz_server -->> client: 返回 attacker-token
 client -->> user_browser: 登录 attacker 账号，并建立会话
@@ -571,11 +582,11 @@ autonumber
 participant attacker_browser as Attacker Browser
 participant user_browser as User Browser
 participant client as Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 
 user_browser ->> client: 登录
 client -->> user_browser: 重定向至授权请求，设置会话 cookie(state=u, code_verifier=user)
-user_browser ->> authz_server: Authorize?state=u&code_challenge=sha256(user)
+user_browser ->> authz_server: Authorize?state=u + code_challenge=sha256(user)
 
 rect rgb(0, 255, 255, .1)
     Note right of attacker_browser: 获取 Attacker Code 并通过 CSRF 交给 User Browser
@@ -585,20 +596,20 @@ rect rgb(0, 255, 255, .1)
     rect rgb(255, 0, 0, .4)
         Note right of attacker_browser: 删除 code_challenge=sha256(attacker)rect rgb(0, 255, 255, .1)
         attacker_browser ->> authz_server: Authorize?state=a
-        authz_server -->> attacker_browser: 302 Location: client_redirect_uri?code=attacker-code&state=a
+        authz_server -->> attacker_browser: 302 Location: client_redirect_uri?code=attacker-code + state=a
         attacker_browser ->> attacker_browser: 终止重定向，提取出 attacker-code，并生成页面交给 User Browser
     end
 end
 
 user_browser ->> user_browser: 由于 CSRF，获得了 Attacker 的页面
-user_browser ->> client: client_redirect_uri?code=attacker-code&state=a
+user_browser ->> client: client_redirect_uri?code=attacker-code + state=a
 
 rect rgb(255, 255, 0, .1)
     Note right of user_browser: 如果校验了 state 则不会有这个问题，但是很多 Client 往往不会去校验 state。
     client ->> client: 校验 state, u != a
     client -->> user_browser: 返回失败
 end
-client -> authz_server: Token?code=attacker-code&code_verifier=user
+client -> authz_server: Token?code=attacker-code + code_verifier=user
 authz_server -->> client: 返回 attacker-token
 client -->> user_browser: 登录 attacker 账号，并建立会话
 ```
@@ -713,7 +724,7 @@ autonumber
 
 participant user as User Browser
 participant client as Attacker Client
-participant authz_server as OAuth Authorization Server
+participant authz_server as Authorization Server
 
 user ->> client: 登录
 client -->> user: 302 Location: Authorize
@@ -723,9 +734,9 @@ user ->> user: 输入账号密码
 
 rect rgb(255, 0, 0, .3)
     Note right of user: Post 带上 BODY，AS 通过 307 进行重定向会把 BODY 再带给 Client
-    user -> authz_server: POST: authN & BODY(user=xx, pwd=yy)
+    user -> authz_server: POST: authN + BODY(user=xx, pwd=yy)
     authz_server -->> user: 307 Location: client_redirect_uri?code=user-code
-    user ->> client: POST client_redirect_uri?code=user-code & BODY(user=xx, pwd=yy)
+    user ->> client: POST client_redirect_uri?code=user-code + BODY(user=xx, pwd=yy)
 end
 client ->> client: 获得用户的用户名和密码
 client -->> user: 返回
