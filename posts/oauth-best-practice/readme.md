@@ -213,9 +213,57 @@ PKCE 是当今 OAuth 最主流的解决方案（起初只是用于 Native Applic
 
 ### Access Token Injection
 
+Access Token 的注入攻击是指的 Attacker 尝试向合法 Client 中注入窃取的 Access Token，这意味着 Attacker 利用 Access Token 伪造某个用户进行登录。
+
+为了实施这样的攻击，Attacker 向 Client 发起了 Implicit Flow，并替换 AS 颁发的 Access Token 来修改授权响应。
+
+无法在 OAuth 协议级别检测到这样的攻击，因此建议使用授权码模式进行登录，而对授权码注入攻击的考虑在 [Authorization Code Injection](#authorization-code-injection) 中阐述。
+
+**注意：**
+
+- 这不是 CSRF 攻击，Client 只会收到 Access Token 和 state，而 Access Token 和 state 之间没有绑定关系，所以 Client 无法判断。
+- 这是针对 Access Token 注入，若是扩展一下到 ID Token，可以依赖其 nonce 来进行检测 ID Token 是否被注入。
+
 ### Cross Site Request Forgery
 
+Attacker 可能通过受害者设备向 Client 的重定向 URL 注入请求，以此让受害者访问攻击者的资源。
+
+**应对措施**
+
+- 传统方案是使用 CSRF Token，并将 Token 关联到 User Agent 会话上，并将 CSRF Token 作为 state 参数传递至 AS。
+- PKCE 基于生成的 code verifier 随机数，可以提供 CSRF 攻击的保护。可能受 PKCE 降级攻击，请参考 [PKCE Downgrade Attack](#pkce-downgrade-attack)。
+- OIDC 授权请求的 nonce 需要绑定 User Agent 会话上，因此和 state 类似，提供了相同程度的保护。
+
+**注意：**
+
+- state 用于承载状态，其完整性是一个问题，Client 必须防止 state 的篡改和替换，这可以将 state 绑定到 User Agent 会话中，或者进行加密或者签名。
+
 ### PKCE Downgrade Attack
+
+PKCE 降级攻击：对于那些实现了 PKCE 机制，但未强制要求的 AS，或者未检测当前的流程是否属于 PKCE 的 AS，具有潜在 PKCE 降级攻击的可能。
+
+简单的说，这个攻击属于 CSRF 攻击的一个变种，其目标也是让受害者访问攻击者的资源。
+
+具体的说，CSRF 攻击可以使用 PKCE 来进行抵御，但这种抵御可能会遭受 PKCE 降级攻击，导致 PKCE 无法抵御 CSRF 攻击。
+
+此攻击有两个前提条件：
+
+- Client 并未很好的使用 state 进行检查。
+- AS 的 PKCE 会因为某些参数未填而关闭掉（例如没有填 code_challenge 默认不开启 PKCE 流程）。
+
+**攻击步骤**
+
+1. 用户使用 AS 的 Client 启动了 OAuth 会话，并且 Client 使用了 code_challenge=sha256(abc) 的 PKCE 流程，Client 正在等待 AS 的授权响应（经过 User Agent）。
+1. Attacker 在自己的设备上开启 OAuth 会话，并且 Client 使用了 code_challenge=sha256(xyz)，但 Attacker 自己改造请求，删除了 code_challenge，这将导致 AS 响应的 code 没有使用 PKCE 机制。
+1. Attacker 现在通过用户的 User Agent 将自己的 code 注入到 Client 的重定向 URL 上，client 会使用 code_verifier=abc 去 AS 获取 Token。
+1. AS 因为判断 code 没有处于 PKCE 流程，会忽略了 code_verifier 参数，进而颁发了 Attacker 的 Access Token，完成了 CSRF 攻击。
+
+code_verifier 通常会和 User Agent 会话绑定，因此第一步是必然的，否则 User Agent 中没有包含 code_verifier 的会话，Client 自己可能会拒绝。
+
+**应对措施**
+
+- state 可以很好的解决这个问题，但是 state 依赖于 Client 的实现，并且实践表明大部分 Client 都未能很好的检测 state。
+- code 中必须包含 PKCE 的标识，如果开启了 PKCE，则要求 code_verifier 参数必须存在，如果没有开启 PKCE，则要求 code_verifier 一定不能存在。
 
 ### Access Token Leakage at the Resource Server
 
@@ -234,3 +282,4 @@ PKCE 是当今 OAuth 最主流的解决方案（起初只是用于 Native Applic
 ## References
 
 1. [draft-ietf-oauth-security-topics-18](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-security-topics)
+1. [OAuth 2.0 Threat Model and Security Considerations](https://www.rfc-editor.org/rfc/rfc6819.html)
