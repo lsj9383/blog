@@ -355,6 +355,71 @@ code_verifier 通常会和 User Agent 会话绑定，因此第一步是必然的
 
 ### Access Token Leakage at the Resource Server
 
+某些情况下，Access Token 可能会从资源服务器 RS 上泄漏。
+
+Attacker 可能并诱使 Client 向其他 RS 发送有效的访问令牌，如果 Client 有效的 Access Token 被发送到了 RS，但：
+
+- 该 RS 是 Attacker 自己的 RS
+- Attacker 污染了 RS，可以拿到 RS 的部分权限
+
+Attacker 会拿到 Access Token，进而访问用户资源。很明显，该攻击基于了如下的假设：
+
+- Client 在 development-time（开发期间）没有绑定当某个具体的 RS。
+- Client 在 runtime 期间被提供 RS 的 URL
+
+这种后期绑定 RS 的典型场景主要是由 User 或者 Admin 为 Client 配置 Service，并使用标准 API 进行访问（例如 email、日历）等。
+
+**应对措施**
+
+可以从几个方面避免或减少这样的攻击：
+
+- Metadata
+  - AS 可以向 Client 提供 Metadata 以指示 Client 可以安全使用的 RS 范围，这是一个 Metadata 的示例：
+
+    ```text
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+
+    {
+        "issuer":"https://server.somesite.example",
+        "authorization_endpoint": "https://server.somesite.example/authorize",
+        "resource_servers":[
+            "email.somesite.example",
+            "storage.somesite.example",
+            "video.somesite.example"
+        ]
+        ...
+    }
+    ```
+  - AS 也可以返回 Access Token 时返回一个 RS URL：
+
+    ```text
+    HTTP/1.1 200 OK
+    Content-Type: application/json;charset=UTF-8
+    Cache-Control: no-store
+    Pragma: no-cache
+
+    {
+        "access_token":"2YotnFZFEjr1zCsicMWpAA",
+        "access_token_resource_server": "https://hostedresource.somesite.example/path1",
+        ...
+    }
+    ```
+
+  - 这种方式缺点是我们不能假设 Client 正确使用了 Metadata，我们无法对 Client 具体实现做要求。
+- Sender-Constrained Access Tokens
+  - 受限制的发送者令牌，具体而言发送令牌会绑定到某个明确的 Sender 上，Sender 有责任了解某个 secret，以作为 RS 接收 Access Token 的前提条件。
+  - 这里是一些 OAuth 工作小组推荐的方式：
+    - [OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](https://www.rfc-editor.org/rfc/rfc8705.html)
+    - [DPoP](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-dpop-02)
+    - [OAuth Token Binding](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-token-binding-08)
+    - [Signed HTTP Requests](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-signed-http-request-03)
+    - [JWT Pop Tokens](https://datatracker.ietf.org/doc/html/draft-sakimura-oauth-jpop-05)
+  - OAuth Mutual TLS 是目前实施最广泛，也是唯一的标准化的 Sender-Constrained 方案。因此，建议使用OAuth Mutual TLS。
+- Audience Restricted Access Tokens
+  - 受众限制是将 Access Token 限定为只能访问特定的 RS。
+- 避免在 RS 的日志中记录 Access Token。
+
 ### Open Redirection
 
 若 AS 或 Client 支持 Open Redirector 时，会潜藏着被攻击的可能。
@@ -468,4 +533,7 @@ X-Frame-Options: ALLOW-FROM https://ext.example.org:8000
 1. [The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749.html)
 1. [draft-ietf-oauth-token-binding-08](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-token-binding-08)
 1. [OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](https://www.rfc-editor.org/rfc/rfc8705.html)
+1. [OAuth 2.0 Demonstrating Proof-of-Possession at the Application Layer](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-dpop-02)
+1. [draft-ietf-oauth-signed-http-request-03](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-signed-http-request-03)
+1. [draft-sakimura-oauth-jpop-05](https://datatracker.ietf.org/doc/html/draft-sakimura-oauth-jpop-05)
 1. [CSP-2](https://www.w3.org/TR/CSP2/)
