@@ -275,11 +275,58 @@ code_verifier 通常会和 User Agent 会话绑定，因此第一步是必然的
 
 ### Refresh Token Protection
 
+Refresh Token 是一种简单且友好的方式便于 Client 去获取一个新的 Access Token。Refresh Token 的存在也允许 Access Token 的过期时间尽可能短，以减小泄露 Access Token 带来的影响。
+
+Attacker 经常会以 Refresh Token 作为目标，因为 Refresh Token 代表了 RO(Resource Owner) 委派给 Client 总体授权，如果 Attacker 获取到了 Refers Token 并能够重播，那么 Attacker 就可以获取到 Access Token，并访问 RS。
+
+在 [The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749.html) 中对 Refresh Token 提出了基本的要求：
+
+1. 对 Refresh Token 的传输和存储要求是机密的。
+1. Client 和 AS 之间基于 TLS 进行传输。
+1. AS 维护并检查 Refresh Token 与 Client ID 的绑定关系。
+1. 令牌刷新的时候对 Client 身份进行验证。
+1. Refresh Token 无法人为生成、修改和猜测。
+
+除此外，AS 必须使用下述方法之一来检测对 Public Client 的 Refresh Token 重播：
+
+- Sender-constrained refresh tokens，AS 通过 [OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](https://www.rfc-editor.org/rfc/rfc8705.html) 或 [draft-ietf-oauth-token-binding-08](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-token-binding-08) 机制，加密绑定 Refresh Token 到一个固定的 Client。这种方式即便 Refresh Token 被导出，重放，也可以很好的被 AS 所拒绝。
+- Refresh token rotation，AS 颁发一个新的 Refresh Token 后，先前的 Refresh Token 需要强制失效。如果 Attacker 获取到了一个 Refresh Token，并且和 Client 同时去 AS 刷新，其中一个必然是无效的 Refresh Token，而 AS 并不知道谁才是真正的 Client，此时需要 AS 撤销活跃 Refresh Token，强制让 Client 重新授权。
+
+对于以下事件，AS 可以主动撤销 Refresh Token：
+
+- 用户修改密码
+- AS 提供 Revoke 的接口
+
 ### Client Impersonating Resource Owner
 
 ### Click jacking
+
+AS 可能受到点击劫持的影响，点击劫持通常是在 AS 的授权页面使用 iframe 所带来的问题，攻击方式如下：
+
+1. Attacker 申请一个合法的 Client。
+1. Attacker 在自己的页面中通过 iframe 嵌入 AS 的授权页面。
+1. Attacker 用某种方式吸引用户点击 Attacker Client 的某个图片，该图片下面是 AS 的授权接口。
+1. 用户点击图片后，将会在用户不自知的情况下为 Attacker Client 授权，以此 Attacker 可以获得用户的 Access Token，访问其资源。
+
+AS 必须阻止点击劫持攻击，需要利用浏览器的安全机制，主要在返回授权页面时返回安全相关的 HTTP Headers，如下：
+
+- X-Frame-Options，设置 iframe 的嵌入策略。
+- 使用 Content Security Policy (CSP) level 2 [CSP-2](https://www.w3.org/TR/CSP2/) 或更高的安全级别.
+
+这是一个非标准示例：
+
+```http
+HTTP / 1.1 200 OK 
+Content-Security-Policy: frame-ancestors https://ext.example.org:8000 
+Content-Security-Policy: script-src'self'
+X-Frame-Options: ALLOW-FROM https://ext.example.org:8000 
+```
 
 ## References
 
 1. [draft-ietf-oauth-security-topics-18](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-security-topics)
 1. [OAuth 2.0 Threat Model and Security Considerations](https://www.rfc-editor.org/rfc/rfc6819.html)
+1. [The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749.html)
+1. [draft-ietf-oauth-token-binding-08](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-token-binding-08)
+1. [OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](https://www.rfc-editor.org/rfc/rfc8705.html)
+1. [CSP-2](https://www.w3.org/TR/CSP2/)
