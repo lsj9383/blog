@@ -261,6 +261,31 @@ https://your.site.com/auth/callback?code=xxxx-yyyy-zzzz&state
 
 在该页面发起的请求 referer 中会包含 `https://your.site.com/auth/callback?code=xxxx-yyyy-zzzz&state` 内容。
 
+```mermaid
+sequenceDiagram
+autonumber
+
+participant user_browser as User Browser
+participant client as Client
+participant authz_server as OAuth Authorization Server
+participant attacker as Attacker
+
+user_browser ->> client: 登录
+client -->> user_browser: 302 Location: Authorize?state=user-state
+user_browser ->> authz_server: Authorize?state=user-state
+authz_server -->> user_browser: 302 Location: client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state
+user_browser ->> client: client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state
+client -->> user_browser: 返回页面
+
+rect rgb(255, 0, 0, .3)
+    Note right of user_browser: User Browser 处于 client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state 页面下
+    user_browser ->> user_browser: 由于某些原因，页面包含 img 等会请求 Attacker 的 URL
+    user_browser ->> attacker: 请求 & HTTP Headers referer: client_redirect_uri?code=xxxx-yyyy-zzzz&state=user-state
+    attacker ->> attacker: 获得用户的 code 和 state
+    attacker -->> user_browser: 返回
+end
+```
+
 **Leakage from the Authorization Server**
 
 类似的方法，如果 Authorization Endpoint 如果包含了到 Attacker 的链接，则 Attacker 将会获取到 state。
