@@ -167,9 +167,11 @@ Attacker | Description
 -|-
 A1 | Web Attackers，可以控制任意数量的网络端点（包括浏览器和服务器，RO、AS 和 RS 除外）。A1 可能会设置 RO 所访问的网站，操作用户代理以及传输协议。
 A2 | Network Attackers，可以窃听、操作和欺骗网络消息，除非这些消息受 TLS 保护。A2 也可以阻止任意消息。
-A3 | 能够读取，但是不能修改授权响应的攻击者。
-A4 | 能够读取，但是不能修改授权请求的攻击者。
+A3 | 能够读取，但是不能修改授权`响应`的攻击者。
+A4 | 能够读取，但是不能修改授权`请求`的攻击者。
 A5 | 攻击者可以获得 AS 颁发的访问令牌。
+
+对攻击者模型更详细的阐述请参考 [The Updated OAuth 2.0 Attacker Model](https://www.ietf.org/archive/id/draft-ietf-oauth-security-topics-18.html#name-the-updated-oauth-20-attack)。
 
 ## Attacks and Mitigation
 
