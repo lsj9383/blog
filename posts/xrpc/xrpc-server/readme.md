@@ -70,6 +70,8 @@ class Service {
   +MessageHandleFunction message_handle_function_
   +MessageWriteDoneFunction message_writedone_function_
   +HandleTransportMessage(recv, send) virtual
+  +AddRpcServiceMethod(method)
+  +AddNonRpcServiceMethod(method)
   +SetHandleRequestDispatcherFunction(function)
   +SetAcceptConnectionFunction(function)
   +SetConnectionEstablishFunction(function)
