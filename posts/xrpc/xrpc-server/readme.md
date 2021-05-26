@@ -15,6 +15,9 @@
         - [RpcServiceImpl](#rpcserviceimpl)
         - [ConcreteRpcService](#concreterpcservice)
     - [UnaryServiceHandler](#unaryservicehandler)
+    - [RpcMethodHandler](#rpcmethodhandler)
+    - [ServerContext](#servercontext)
+        - [Async Response](#async-response)
 
 <!-- /TOC -->
 
@@ -112,6 +115,26 @@ class HttpService {
   +FilterController filter_controller_
   +HandleTransportMessage(recv, send)
   +SetRoutes(function)
+}
+
+class ServerContext {
+  +Status status_
+  +ProtocolPtr req_msg_
+  +ProtocolPtr rsp_msg_
+  +BasicInfoPtr basic_info_
+  +SendUnaryResponse(status, biz_rsp)
+  +SendUnaryResponse(status)
+  +SendResponse(buff)
+  +SetRequestMsg(req)
+  +SetResponseMsg(rsp)
+  +SetResponse(is_response)
+  +SetRspCompressType(compress_type)
+  +SetRspEncodeType(encode_type)
+  +SetStatus(status)
+  +GetRequestMsg() ProtocolPtr
+  +GetResponseMsg() ProtocolPtr
+  +IsResponse() bool
+  +GetStatus() Status
 }
 ```
 
@@ -312,7 +335,8 @@ static const char* Greeter_method_names[] = {
 
 Greeter::Greeter() {
   auto rpc_func = std::bind(&Greeter::SayHello, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)
-  auto rpc_handler = new xrpc::RpcMethodHandler<xrpc::test::helloworld::HelloRequest, xrpc::test::helloworld::HelloReply>(rpc_func);
+  auto rpc_handler = new xrpc::RpcMethodHandler<xrpc::test::helloworld::HelloRequest,
+                                                xrpc::test::helloworld::HelloReply>(rpc_func);
   auto method = new xrpc::RpcServiceMethod(Greeter_method_names[0],
                                            xrpc::MethodType::UNARY,
                                            rpc_handler);
@@ -392,3 +416,70 @@ void HandleMessage(STransportReqMsg* recv, STransportRspMsg** send) {
     }
   }
 ```
+
+## RpcMethodHandler
+
+RpcMethodHandler 是对 RPC Handler 执行的代理，主要是针对数据进行序列化、编码、压缩等。可以参考 [ConcreteRpcService](#concreterpcservice)，在注册 RPC Handler 时，会包装一层 RpcMethodHandler。其最核心的部分就是 Execute 方法：
+
+```cpp
+void Execute(const ServerContextPtr& context,
+             NoncontiguousBuffer&& req_body,
+             NoncontiguousBuffer& rsp_body) override {
+
+    // 传给 RPC Handler 进行处理的是栈上的变量，异步 RPC Handler 最好拷贝后再使用
+    RequestType req;
+    ResponseType rsp;
+
+    // 解压缩
+    auto decompress_type = context->GetCompressType();
+    compressor::DecompressIfNeeded(decompress_type, req_body);
+
+    // 反序列化
+    uint32_t encode_type = context->GetEncodeType();
+    ret = Deserialize(encode_type, &req_body, static_cast<void*>(&req));
+
+    // 设置反序列化后的请求数据
+    context->SetRequestData(&req);
+
+    // rpc请求处理前的埋点
+    filter_controller_.RunMessageServerFilters(FilterPoint::SERVER_PRE_RPC_INVOKE, context);
+
+    auto status = func_(context, &req, &rsp);
+
+    context->SetResponseData(&rsp);
+
+    // 异步回包
+    if (!context->IsResponse()) {
+      return;
+    }
+
+    // rpc请求处理后的埋点
+    filter_controller_.RunMessageServerFilters(FilterPoint::SERVER_POST_RPC_INVOKE, context);
+
+    // 序列化
+    Serialize(encode_type, static_cast<void*>(&rsp), rsp_body);
+
+    // 压缩
+    compressor::CompressIfNeeded(context->GetRspCompressType(), rsp_body,
+                                 context->GetRspCompressLevel());
+  }
+```
+
+## ServerContext
+
+ServerContext 是个关键的类，提供了请求上下文的相关信息，包括：
+
+- 底层信息结构 basic_info
+- 支持同步/异步响应
+- 设置响应编码方式
+- 设置响应压缩方式
+
+### Async Response
+
+异步响应的第一步是需要设置 `is_response` 为 false：
+
+```cpp
+context->SetResponse(false);
+```
+
+如此，在 RPC Handler 调用结束的时候并不会立即回包。
