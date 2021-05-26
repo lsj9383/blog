@@ -546,6 +546,8 @@ client -->> user_browser: 登录 attacker 账号，并建立会话
 - PKCE 的 code_verifier 需要绑定 User Agent 绘画上，可以提供 CSRF 攻击的保护。可能受 PKCE 降级攻击，请参考 [PKCE Downgrade Attack](#pkce-downgrade-attack)。
 - OIDC 授权请求的 nonce 需要绑定 User Agent 会话上，因此和 state 类似，提供了相同程度的保护。
 
+[前端安全系列（二）：如何防止CSRF攻击？](https://tech.meituan.com/2018/10/11/fe-security-csrf.html) 该文有一些针对 CSRF 攻击及预防的讨论。
+
 **注意：**
 
 - state 用于承载状态，其完整性是一个问题，Client 必须防止 state 的篡改和替换，这可以将 state 绑定到 User Agent 会话中，或者进行加密或者签名。
