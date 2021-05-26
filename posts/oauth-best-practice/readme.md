@@ -7,8 +7,6 @@
     - [Recommendations](#recommendations)
         - [Protecting Redirect-Based Flows](#protecting-redirect-based-flows)
         - [Token Replay Prevention](#token-replay-prevention)
-            - [Access Token](#access-token)
-            - [Refresh Tokens](#refresh-tokens)
         - [Access Token Privilege Restriction](#access-token-privilege-restriction)
         - [Resource Owner Password Credentials Grant](#resource-owner-password-credentials-grant)
         - [Client Authentication](#client-authentication)
@@ -749,6 +747,10 @@ client -->> user: 返回
 在 HTTP 标准中，只有 303 明确要求浏览器将 HTTP POST 重写为 HTTP GET，包括流行的 302 重定向也没有明确指定该行为（虽然绝大部分浏览器对于非 307 的重定向都会 POST 转 GET）。
 
 因此 AS 实现时，一定不能使用 307 进行重定向，而是应该尽量使用 303 重定向。
+
+MDN 中对 302 状态码的解释：
+
+> 规范要求浏览器在重定向时保证请求方法和请求主体不变，但并不是所有的用户代理都会遵循这一点，你依然可以看到有缺陷的软件的存在。所以推荐仅在响应 GET 或 HEAD 方法时采用 302 状态码，而在其他时候使用 307 Temporary Redirect 来替代。在确实需要将重定向请求的方法转换为 GET的场景下，可以使用 303 See Other。
 
 ### TLS Terminating Reverse Proxies
 
