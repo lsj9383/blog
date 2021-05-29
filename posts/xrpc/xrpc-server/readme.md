@@ -238,6 +238,10 @@ Xrpc 的 Service 由 [ServiceAdapter](#serviceadapter) 进行维护：
 
 ### ServiceImpl
 
+#### HandleTransportMessage
+
+ServiceImpl::HandleTransportMessage 是 RpcService 和 NonRpcService 的统一消息处理入口：
+
 ```cpp
 void ServiceImpl::HandleTransportMessage(STransportReqMsg* recv, STransportRspMsg** send) {
   // 尝试处理流式数据, 如果不是流式数据, 则走unary逻辑
@@ -253,6 +257,47 @@ void ServiceImpl::HandleTransportMessage(STransportReqMsg* recv, STransportRspMs
 
 `unary_service_handler_->HandleMessage()` 由 [UnaryServiceHandler](#unaryservicehandler) 进行处理，其中包括了上下文创建、Filter 执行、限流等处理，最重要的是分发请求到对应的 RPC Handler 执行。在 [UnaryServiceHandler](#unaryservicehandler) 中，最终会使用 [RpcServiceImpl](#rpcserviceimpl) 的 Dispatch 函数进行分发请求处理。
 
+#### SendUnaryResponse
+
+ServiceImpl::SendUnaryResponse 是 RpcService 和 NonRpcService 的统一消息（同步）回复函数：
+
+```cpp
+void ServiceImpl::SendUnaryResponse(const ServerContextPtr& context, ProtocolPtr& rsp,
+                                    STransportRspMsg** send) {
+  NoncontiguousBuffer send_data;
+
+  // 将数据序列化为二进制数据
+  adapter_->GetServerCodec()->ZeroCopyEncode(context, context->GetResponseMsg(), send_data);
+
+  // 构造响应 Message
+  *send = new STransportRspMsg();
+  (*send)->basic_info = context->GetTransportBasicInfo();
+  (*send)->send_data = std::move(send_data);
+}
+```
+
+很明显，该函数并非进行实际的 IO 调用，而是构造一个 STransportRspMsg* send 消息体，该消息的实际发送是在 ServiceAdapter 的 HandleAnyMessage 构造的 task 中：
+
+```cpp
+bool ServiceAdapter::HandleAnyMessage(const ConnectionPtr& conn, std::deque<std::any>& msg) {
+  Task* task = new Task;
+  task->handler = [this](Task* task) {
+    this->service_->HandleTransportMessage(req_msg, &send);
+
+    // send 数据已经构造，则发送数据
+    if (send) {
+      this->transport_->SendMsg(send);
+    }
+  };
+  
+  threadmodel_->SubmitHandleTask(task);
+
+  return true;
+}
+```
+
+该函数请参考 [HandleAnyMessage](#handleanymessage)。
+
 ### RpcServiceImpl
 
 RpcServiceImpl 是 RpcService 实现类，主要是实现如何将请求分发给对应的 RPC Handler 函数进行处理。
@@ -263,7 +308,7 @@ RpcServiceImpl 是 RpcService 实现类，主要是实现如何将请求分发�
 void RpcServiceImpl::Dispatch(const ServerContextPtr& context, const ProtocolPtr& req,
                               ProtocolPtr& rsp) {
   // rpc_service_methods 由 RpcServiceImpl 子类初始化时进行 methods 的注册
-  const auto& rpc_service_methods = GetRpcServiceMethod();
+  const auto& rpc_service_methods = GeXRPCServiceMethod();
 
   // 根据 function name 找到 RPC Handler
   // name e.g. /xrpc.test.helloworld.Greeter/SayHello
@@ -275,7 +320,7 @@ void RpcServiceImpl::Dispatch(const ServerContextPtr& context, const ProtocolPtr
   }
 
   NoncontiguousBuffer response_body;
-  RpcMethodHandlerInterface* method_handler = it->second->GetRpcMethodHandler();
+  RpcMethodHandlerInterface* method_handler = it->second->GeXRPCMethodHandler();
   method_handler->Execute(context, req->GetNonContiguousProtocolBody(), response_body);
 
   // 同步响应，设置响应 Body
@@ -482,4 +527,90 @@ ServerContext 是个关键的类，提供了请求上下文的相关信息，包
 context->SetResponse(false);
 ```
 
-如此，在 RPC Handler 调用结束的时候并不会立即回包。
+如此，在 RPC Handler 调用结束的时候并不会立即回包，这在 `UnaryServiceHandler::HandleMessage` 进行的判断：
+
+```cpp
+void UnaryServiceHandler::HandleMessage(STransportReqMsg* recv, STransportRspMsg** send) {
+  // 创建上下文
+  ServerContextPtr context = MakeRefCounted<ServerContext>(*recv);
+
+  // 超时、Filter 等等处理
+
+  // 请求消息分发处理
+  service_impl_->Dispatch(context, context->GetRequestMsg(), context->GetResponseMsg());
+
+  // false 则不进行回包
+  if (context->IsResponse()) {
+    service_impl_->SendUnaryResponse(context, context->GetResponseMsg(), send);
+  }
+}
+```
+
+关于 SendunaryResponse 请参考 [SendunaryResponse](#sendunaryresponse)。
+
+至此，可以使用两种方式来进行异步响应发起：
+
+- SendUnaryResponse(status), 对于 RPC Service 只会返回一个 status 信息，对于 HTTP Service 会影响 HTTP Headers：
+
+  ```cpp
+  void ServerContext::SendUnaryResponse(const xrpc::Status& status) {
+    status_ = status;
+  
+    // filter埋点控制器
+    GetFilterController().RunMessageServerFilters(FilterPoint::SERVER_PRE_SEND_MSG, this);
+
+    NoncontiguousBuffer send_data;
+
+    // 编码
+    adapter_->GetServerCodec()->ZeroCopyEncode(this, rsp_msg_, send_data);
+
+    auto* send_msg = new STransportRspMsg();
+    send_msg->basic_info = GetTransportBasicInfo();
+    send_msg->send_data = std::move(send_data);
+
+    SendTransportMsg(send_msg);
+  }
+  ```
+
+- SendUnaryResponse(status, rsp)，对于 RPC Service 有效，用于设置响应的 protobuf：
+
+  ```cpp
+  // status 为接口调用的结果，biz_rsp 为业务层的数据对象
+  template <typename T>
+  void SendUnaryResponse(const xrpc::Status& status, const T& biz_rsp) {
+    SetResponseData(&biz_rsp);
+
+    // ...
+
+    // protobuf 序列化
+    void* rsp = static_cast<void*>(const_cast<T*>(&biz_rsp));
+    NoncontiguousBuffer data;
+    serialization->Serialize(type, rsp, &data);
+
+    // 数据压缩
+    auto compress_type = GetRspCompressType();
+    compressor::CompressIfNeeded(compress_type, data, GetRspCompressLevel());
+
+    // 设置响应 body
+    rsp_msg_->SetNonContiguousProtocolBody(std::move(data));
+    ProcessResponseStatus(true, status);
+  }
+
+  void ServerContext::ProcessResponseStatus(bool encode_ret, Status status) {
+    GetFilterController().RunMessageServerFilters(FilterPoint::SERVER_POST_RPC_INVOKE, this);
+
+    if (encode_ret) {
+      SendUnaryResponse(status);
+      return;
+    }
+
+    Status encode_status;
+    if (adapter_->GetServerCodec() != nullptr) {
+      encode_status.SetFrameworkRetCode(
+          adapter_->GetServerCodec()->GetProtocolRetCode(xrpc::codec::ServerRetCode::ENCODE_ERROR));
+    } else {
+      encode_status.SetFrameworkRetCode(XrpcRetCode::XRPC_SERVER_ENCODE_ERR);
+    }
+    SendUnaryResponse(encode_status);
+  }
+  ```
