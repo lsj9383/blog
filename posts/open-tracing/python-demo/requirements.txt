@@ -1,0 +1,5 @@
+jaeger-client>=4.3,<5
+
+requests
+flask
+futures; python_version < "3"

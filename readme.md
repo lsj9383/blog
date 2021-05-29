@@ -1,5 +1,6 @@
 # 博客
 
+- [Open Tracing](open-tracing/readme.md)
 - [OAuth 2.0 Security Best Current Practice](posts/oauth-best-practice/readme.md)
 - [Reactor](posts/reactor/readme.md)
 - [Xrpc](posts/xrpc/readme.md)
