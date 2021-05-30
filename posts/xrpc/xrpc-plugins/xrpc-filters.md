@@ -15,9 +15,94 @@
 
 ## Overview
 
+Filter 基于 AOP，也就是我们所说的面向切面编程。
+
+AOP 的相关名词：
+
+- 切面：即 Filter，它会定义了埋点以及实现方法。
+- 切点：即埋点，即在特定的位置会触发相应的逻辑。
+
+对于客户端：可以在`请求发起前`做一些事情，`收到响应后`做一些事情。
+
+对于服务端：可以在`接收请求后`做一些事情，`发送响应前`做一些事情。
+
 Xrpc 框架已经内嵌了一些 Filter 用户可以直接通过配置文件进行使用，也可以用户自定义 Filter（同样需要用户通过配置文件打开）。
 
+Xrpc 中 Filter 存在两个概念：
+
+- Service Filter，用于某个特定的 Service。
+- Global Filter，用于所有的 Service。
+
+在配置文件中将 Filter 配置到不同的位置决定了是 Global Filter 还是 Service Filter：
+
+```yaml
+client:
+  filter:  # global filter
+    - filter-name-1
+    - filter-name-2
+  service:
+    - name: service-name-1
+      filter:  # service filter
+        - filter-name-3
+        - filter-name-4
+server:
+  filter:  # global filter
+    - filter-name-5
+    - filter-name-6
+  service:
+    - name: service-name-2
+      filter:  # service filter
+        - filter-name-7
+        - filter-name-8
+```
+
+Xrpc 中提供的埋点请参考 [Filter](#filter)。
+
 ## Quick Start
+
+Xrpc 用户自定义并注册一个 Filter 非常简单：
+
+- 继承 Filter 类进行实现
+- 将 Filter 注册到 XrpcPlugins
+- 在配置文件中写明使用的 Filter。
+
+例如这里注册一个 test-filter：
+
+```cpp
+class TestFilter : public xrpc::MessageClientFilter {
+ public:
+  explicit TestFilter() {}
+
+  ~TestFilter() override {}
+
+  std::string Name() override { return "test-filter"; }
+
+  std::vector<xrpc::FilterPoint> GetFilterPoint() override {
+    std::vector<xrpc::FilterPoint> points = {xrpc::FilterPoint::CLIENT_PRE_SEND_MSG};
+    return points;
+  }
+
+  void operator()(xrpc::FilterStatus& status, xrpc::FilterPoint point,
+                  const xrpc::ClientContextPtr& context) override {
+    std::cout << "========== test_filter =========" << std::endl;
+  }
+};
+```
+
+向 XrpcPlugins 中注册：
+
+```cpp
+xrpc::MessageClientFilterPtr p(new TestFilter());
+xrpc::XrpcPlugin::GetInstance()->RegisterClientFilter(p);
+```
+
+在配置文件中声明为 Global Filter：
+
+```yaml
+client:
+  filter:
+    - test-filter
+```
 
 ## UML Class Diagram
 
