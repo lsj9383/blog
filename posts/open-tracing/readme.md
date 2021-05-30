@@ -38,6 +38,10 @@ OpenTracing 对不同的 Tracer 实现进行了抽象，这意味着开发人员
 
 ## Concepts
 
+下图描绘了 OpenTracing 中的主要组件和关系：
+
+![concepts](assets/concepts.png)
+
 ### Span
 
 [What is a Span?](https://opentracing.io/docs/overview/spans/) 中提到，span 是分布式 trace 中的主要构建块，代表了分布式系统中的独立工作单元。
@@ -100,7 +104,7 @@ Tags 的 key 必须是字符串，而 value 支持 string、bool、numeric。
 
 ### Logs
 
-Logs 是一个 key:value，便于对 span 的日志数据进行捕获，以及输出其他的一些调试信息。
+一个 Log 拥有一个时间戳，以及多个 `key:value`，Log 便于对 span 的数据进行记录，以及输出其他的一些调试信息。
 
 > Logs are key:value pairs that are useful for capturing span-specific logging messages and other debugging or informational output from the application itself.
 
@@ -401,13 +405,17 @@ SpanContext 会暴露一个迭代 Baggage 的接口给使用者。
 
 参考文献 [OpenTracing Semantic Conventions](https://opentracing.io/specification/conventions/)。
 
+Semantic Conventions 提供了标准化的 Span tags 和 logging keys 字段。
+
 ### Standard span tags table
 
 Spans Tags 适用于整个 Span 的时间范围，而不是 Span 下的某个时间范围（这种场景适合于 Spans Logs）。
 
+以下是标准字段：
+
 Span tag name | Type | Notes and examples
 -|-|-
-component | string | The software package, framework, library, or module that generated the associated Span. E.g., "grpc", "django", "JDBI".
+component | string | 指明由何种组件生产的 Span，例如："grpc", "django", "JDBI"。
 db.instance | string | 数据库实例名称. 例如：对于名为 `customers` 的 Databse，取值为 "customers"。
 db.type | string | 数据库类型。对于 SQL，取值为 "sql"，对于其他则采用小写进行标识，例如："redis"。
 db.user | string | 访问数据库的用户名。
@@ -416,26 +424,29 @@ error | bool | 当应用认为 Span 操作失败时，取值为 true。不存在
 http.method | string | Span 操作的 HTTP 方法。例如："GET"。
 http.status_code | integer | Span 操作的 HTTP 状态码。例如：200。
 http.url | string | 在对应的 Trace 中的请求 URL。例如："https://domain.net/path/to?resource=here"。
-message_bus.destination | string | An address at which messages can be exchanged. E.g. A Kafka record has an associated "topic name" that can be extracted by the instrumented producer or consumer and stored using this tag.
-peer.address | string | Remote “address”, suitable for use in a networking client library. This may be a "ip:port", a bare "hostname", a FQDN, or even a JDBC substring like "mysql://prod-db:3306"
-peer.hostname | string | Remote hostname. E.g., "opentracing.io", "internal.dns.name"
+message_bus.destination | string | 用于消息交换的地址。
+peer.address | string | 对端远程地址。可能是一个 "ip:port"，也可能是一个 "hostname"。
+peer.hostname | string | 对端 hostname。例如："opentracing.io", "internal.dns.name"。
 peer.ipv4 | string | 对端 IPv4 地址。例如："127.0.0.1"。
 peer.ipv6 | string | 对端 IPv6 地址。例如："2001:0db8:85a3:0000:0000:8a2e:0370:7334"。
 peer.port | integer | 对端端口。例如：80。
-peer.service | string | Remote service name (for some unspecified definition of "service"). E.g., "elasticsearch", "a_custom_microservice", "memcache"
-sampling.priority | integer | If greater than 0, a hint to the Tracer to do its best to capture the trace. If 0, a hint to the trace to not-capture the trace. If absent, the Tracer should use its default sampling mechanism.
-span.kind | string | Either "client" or "server" for the appropriate roles in an RPC, and "producer" or "consumer" for the appropriate roles in a messaging scenario.
+peer.service | string | 远程服务名称，对于未指定的则直接取值 `"service"`。例如："elasticsearch", "a_custom_microservice", "memcache"。
+sampling.priority | integer | 如果大于 0，Tracer 应该尽全力采样该 Trace。如果为 0，不捕获该 Trace。如果缺失，则采用默认采样机制。
+span.kind | string | Span 所处系统中的角色，对于 RPC，可以有 "client" 或 "service"。对于消息中间件，可以是 "producer" 或 "consumer"。
 
 ### Standard log fields table
 
+每个 Span Log 都有一个时间戳（必须介于 Span 的起止时间之间），以及多个 `key:value`。
+
+以下是标准字段：
+
 Span log field name | Type | Notes and examples
 -|-|-
-error.kind | string | The type or “kind” of an error (only for event="error" logs).
-error.object | object | For languages that support such a thing (e.g., Java, Python), the actual Throwable/Exception/Error object instance itself.
-event | string | A stable identifier for some notable moment in the lifetime of a Span. For instance, a mutex lock acquisition or release or the sorts of lifetime events in a browser page load described in the Performance.timing specification.
-message | string | A concise, human-readable, one-line message explaining the event.
-stack | string | A stack trace in platform-conventional format; may or may not pertain to an error.
-
+error.kind | string | 错误的类型，当 `event=true` 时该字段存在。
+error.object | object | 语言特定的 Exception 对象序列化内容，通常是错误的原因字符串。
+event | string | 对 Span 生命周期中某个重要时刻的稳定标识。
+message | string | 解释 event 的简洁、易懂的字符串。
+stack | string | 调用栈，可能与 error 有关，便于定位问题。也可以与 error 无关，此时可能是 Log 函数调用时的调用栈。
 
 ## Python Demo
 
