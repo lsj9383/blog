@@ -121,15 +121,6 @@ class TestClientConnectionHandler : public xrpc::ConnectionHandler {
     conn->DoClose(true);
   }
 
-  // 连接关闭完成后的回调，可能会对连接做一些清理、释放内存的工作
-  void ConnectionClean(const xrpc::ConnectionPtr& conn) override {
-    std::cout << "ConnectionClean" << std::endl;
-
-    auto thread_model = xrpc::ThreadModelManager::GetInstance()->GetDefaultThreadModel();
-    auto reactor = thread_model->GetIOThread(0)->GetIoModel()->GetReactor();
-    reactor->SubmitTask([conn] { delete conn; });
-  }
-
   // 发送完数据调用
   void MessageWriteDone(uint32_t seq_id) override {
     std::cout << "MessageWriteDone seq_id: " << seq_id << std::endl;
@@ -221,7 +212,6 @@ ok
 =====================================
 Close ...
 ConnectionClosed
-ConnectionClean
 ```
 
 ### Server Demo
@@ -608,12 +598,14 @@ participant epoll as Epoll
 
 user ->> tcp_conn: Send 发送数据
 
+tcp_conn ->> tcp_conn: 队列中换成需要发送的数据
+
 alt state_ == kConnecting
-  tcp_conn ->> tcp_conn: HandleWriteEvent 主动触发写事件处理
+  tcp_conn ->> tcp_conn: HandleWriteEvent()，会检查连接是否已经建立，若建立了，则直接发送数据
 end
 
-alt 发送数据队列满
-  tcp_conn ->> tcp_conn: HandleWriteEvent 主动触发写事件处理
+alt 发送队列数据超过阈值
+  tcp_conn ->> tcp_conn: HandleWriteEvent()，会检查连接是否已经建立，若建立了，则直接发送数据
 end
 
 alt need_direct_write_ == true 可以直接发送数据
@@ -728,10 +720,15 @@ loop reactor 的 epoll 循环
     end
   end
 
-  loop !io_msgs.empty()
+  loop 发送队列数据不为空
     tcp_conn ->> io_handler: 发送数据 Writev
     io_handler -->> tcp_conn: 响应
+    alt 发送缓冲区满
+      tcp_conn ->> tcp_conn: break
+    end
   end
+
+  tcp_conn -> tcp_conn: 将以发送的数据从队列中剔除
 
   tcp_conn ->> conn_handler: ConnectionTimeUpdate 连接保活通知
   conn_handler -->> tcp_conn: 完成

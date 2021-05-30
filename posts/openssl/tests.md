@@ -6,6 +6,7 @@
     - [JWK RS256 公钥转 PEM](#jwk-rs256-公钥转-pem)
     - [JWK RS256 私钥转 PEM](#jwk-rs256-私钥转-pem)
     - [RSA 公钥 PEM 转 JWK RS256 公钥](#rsa-公钥-pem-转-jwk-rs256-公钥)
+    - [RSA 公钥 PEM 转 JWK RS256 公钥](#rsa-公钥-pem-转-jwk-rs256-公钥-1)
 
 <!-- /TOC -->
 
@@ -126,3 +127,28 @@ base64 n: s5BL8dqBBAowo2oqiHkRnM47ST-k-YKzYgu6qGJqa__UMiZu8CVmxGdQT3HN3kiu4tmssz
 base64 e: AQAB
 ```
 
+## RSA 公钥 PEM 转 JWK RS256 公钥
+
+假设 RSA 公钥 PEM（PKCS#8） 为如下文件（保存为 `public_key.pem`）：
+
+```pem
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs5BL8dqBBAowo2oqiHkR
+nM47ST+k+YKzYgu6qGJqa//UMiZu8CVmxGdQT3HN3kiu4tmsszJFzYZjvu5T5c8f
+k7pCpdE15pu6SkFWn72Ddy5P5EcWYz1kBYFAPOb0l7kUehz2J4Ue6S7aAKQOVqXX
+LgNx5wgsbG9vKVRhL5mdXyHm83Xhp5iKwr1/P0tfRBB8CeqyJcOoHNufSh43eDTA
+s/wVgsQJoLUTgKUyL2aSHAQASHt9FeDv+qP1T+T5P3BSnDI4XbfLflxtlC92feXS
+AjKvwQd7bU3z0Kw8YVMJJwnWyR9p+Fl6tJglesGa3P+IucrApdTM85nTgJ1kO6O+
+2wIDAQAB
+-----END PUBLIC KEY-----
+```
+
+转换为 JWK RS256 公钥：
+
+```
+$ python3 pem_to_ne.py -p public_key.pem
+
+base64 n: s5BL8dqBBAowo2oqiHkRnM47ST-k-YKzYgu6qGJqa__UMiZu8CVmxGdQT3HN3kiu4tmsszJFzYZjvu5T5c8fk7pCpdE15pu6SkFWn72Ddy5P5EcWYz1kBYFAPOb0l7kUehz2J4Ue6S7aAKQOVqXXLgNx5wgsbG9vKVRhL5mdXyHm83Xhp5iKwr1_P0tfRBB8CeqyJcOoHNufSh43eDTAs_wVgsQJoLUTgKUyL2aSHAQASHt9FeDv-qP1T-T5P3BSnDI4XbfLflxtlC92feXSAjKvwQd7bU3z0Kw8YVMJJwnWyR9p-Fl6tJglesGa3P-IucrApdTM85nTgJ1kO6O-2w==
+
+base64 e: AQAB
+```
