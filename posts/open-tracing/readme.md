@@ -27,7 +27,7 @@
 
 早期不同的 Tracer 实现具有不同的 API，并有着自己独立的语义，虽然他们大体而言都是类似的。
 
-OpenTracing 提供了一个开放、一致的 Tracer API，用于藐视分布式事务，尤其是相关的语义、时序、因果关系。
+OpenTracing 提供了一个开放、一致的 Tracer API，用于描述分布式事务，尤其是相关的语义、时序、因果关系。
 
 > OpenTracing provides an open, vendor-neutral standard API for describing distributed transactions, specifically causality, semantics and timing.
 
