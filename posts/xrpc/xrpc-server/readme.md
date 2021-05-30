@@ -21,6 +21,7 @@
         - [ServiceImpl](#serviceimpl)
         - [RpcServiceImpl](#rpcserviceimpl)
         - [ConcreteRpcService](#concreterpcservice)
+        - [HttpService](#httpservice)
     - [UnaryServiceHandler](#unaryservicehandler)
     - [RpcMethodHandler](#rpcmethodhandler)
     - [ServerContext](#servercontext)
@@ -477,12 +478,16 @@ bool ServiceAdapter::HandleAnyMessage(const ConnectionPtr& conn, std::deque<std:
 
 ## Service
 
-Xrpc 的 Service 由 [ServiceAdapter](#serviceadapter) 进行维护：
+Xrpc 的 Service 由 [ServiceAdapter](#serviceadapter) 进行维护。
 
-- 封装了如何处理请求的具体逻辑（但是实际的处理逻辑是交给 完成的）。
-- 封装了如何返回上游响应（针对异步响应模式）。
+Service 屏蔽了 Server 创建连接、关闭连接等等业务不需要关心的事件（当然也可以选择去关心），其核心是：
+
+- 提供了 `HandleTransportMessage` 方法对请求进行处理。
+- 提供了 `SendUnaryResponse` 方法，针对同步模式进行响应。
 
 ### ServiceImpl
+
+ServiceImpl 是 RpcService 的父类，主要提供了流控和 RPC 消息处理的入口。
 
 #### HandleTransportMessage
 
@@ -657,6 +662,49 @@ class GreeterServiceImpl final : public xrpc::test::helloworld::Greeter {
     return xrpc::Status(-1, "");
   }
 };
+```
+
+### HttpService
+
+HttpService 直接继承于 Service：
+
+- 提供了将 Path 和处理函数绑定的方法。
+- 消息处理入口 `HandleTransportMessage`，用于根据请求 Path 分发至绑定的 Handler 进行处理。
+
+```cpp
+void HttpService::HandleTransportMessage(STransportReqMsg* recv, STransportRspMsg** send) {
+  ServerContextPtr context = MakeRefCounted<ServerContext>(*recv);
+
+  // http 这里拿到的 msg 是已经解码后的
+  http::HttpRequestPtr& http_req = std::any_cast<http::HttpRequestPtr&>(recv->msg);
+  http::HttpReply& http_rsp = static_cast<HttpResponseProtocol*>(context->GetResponseMsg().get())->http_rsp;
+
+  // Filters 处理
+  GetFilterController().RunMessageServerFilters(FilterPoint::SERVER_POST_RECV_MSG, context);
+
+  // 分发至 Handler 处理
+  auto status = Dispatch(context, http_req, http_rsp);
+
+  context->SetStatus(status);
+  if (context->IsResponse()) {
+    // Filters 处理
+    GetFilterController().RunMessageServerFilters(FilterPoint::SERVER_PRE_SEND_MSG, context);
+
+    // 将响应数据序列化
+    *send = new STransportRspMsg();
+    (*send)->basic_info = context->GetTransportBasicInfo();
+    http_rsp.SerializeToString((*send)->send_data);
+  }
+}
+```
+
+通过 Dispatch 函数将请求分发至相应的 Handler 处理：
+
+```cpp
+Status HttpService::Dispatch(ServerContextPtr& context, http::HttpRequestPtr& req,
+                             http::HttpReply& rsp) {
+  return routes_.Handle(req->GetRouteUrl(), context, req, rsp);
+}
 ```
 
 ## UnaryServiceHandler
