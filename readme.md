@@ -12,6 +12,8 @@
     - [Xrpc Server Transport](posts/xrpc/xrpc-transport/server-transport.md)
   - [Xrpc Server](posts/xrpc/xrpc-server/readme.md)
   - [Xrpc Client](posts/xrpc/xrpc-client/readme.md)
+  - [Xrpc Plugins](posts/xrpc/xrpc-plugins/readme.md)
+    - [Xrpc Filters](posts/xrpc/xrpc-plugins/xrpc-filters.md)
 - [QUIC](posts/quic/readme.md)
   - [GQUIC](posts/quic/gquic/readme.md)
   - [AIOQUIC](posts/quic/lib/aioquic/readme.md)
