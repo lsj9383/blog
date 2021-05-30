@@ -6,14 +6,19 @@
     - [Overview](#overview)
     - [Quick Start](#quick-start)
     - [UML Class Diagram](#uml-class-diagram)
+    - [Sequence Diagram](#sequence-diagram)
+        - [Server Start](#server-start)
+        - [ServiceAdapter Receive Data](#serviceadapter-receive-data)
     - [XrpcServer](#xrpcserver)
         - [XrpcServer Initial](#xrpcserver-initial)
+        - [RegistryService](#registryservice)
+        - [XrpcServer Start](#xrpcserver-start)
     - [ServiceAdapter](#serviceadapter)
+        - [ServiceAdapter SetService](#serviceadapter-setservice)
+        - [ServiceAdapter Listen](#serviceadapter-listen)
         - [HandleAnyMessage](#handleanymessage)
     - [Service](#service)
         - [ServiceImpl](#serviceimpl)
-            - [HandleTransportMessage](#handletransportmessage)
-            - [SendUnaryResponse](#sendunaryresponse)
         - [RpcServiceImpl](#rpcserviceimpl)
         - [ConcreteRpcService](#concreterpcservice)
     - [UnaryServiceHandler](#unaryservicehandler)
@@ -118,6 +123,12 @@ class HttpService {
   +HandleTransportMessage(recv, send)
   +SetRoutes(function)
 }
+```
+
+ServerContext 是一个独立的类，这里进行单独呈现：
+
+```mermaid
+classDiagram
 
 class ServerContext {
   +Status status_
@@ -140,7 +151,98 @@ class ServerContext {
 }
 ```
 
+## Sequence Diagram
+
+### Server Start
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant main as Main
+participant xrpc_app as XrpcApp
+participant xrpc_server as XrpcServer
+participant service_adapter as ServicAdapter
+participant concrete_service as ConcreteService
+
+main ->> xrpc_app: app.Main()
+xrpc_app ->> xrpc_app: 框架相关初始化
+xrpc_app -->> main: Return
+
+rect rgba(0, 255, 255, .1)
+  main ->> xrpc_app: app.Wait()
+
+  rect rgba(255, 0, 255, .1)
+    xrpc_app ->> xrpc_server: 创建 Server 实例
+    xrpc_server ->> service_adapter: 根据配置文件的 service 配置创建多个 service_adapter
+    service_adapter -->> xrpc_server: 返回 service_adapter 实例
+    xrpc_server -->> xrpc_app: 返回 Server 实例
+  end
+
+  rect rgba(255, 0, 0, .1)
+    xrpc_app ->> concrete_service: 创建 Service 实例
+    concrete_service ->> xrpc_app: 返回 Service 实例
+    xrpc_app ->> xrpc_server: Server.RegistryService 注册 Service
+    xrpc_server ->> service_adapter: ServiceAdapter.SetService 设置 Service
+    service_adapter -->> xrpc_server: Return
+    xrpc_server -->> xrpc_app: Return
+  end
+
+  rect rgba(0, 0, 255, .1)
+    xrpc_app ->> xrpc_server: server.Start()
+    loop 遍历 service_adapter
+      xrpc_server ->> service_adapter: ServiceAdapter.Listen()
+      service_adapter -->> xrpc_server: Return
+    end
+    xrpc_server -->> xrpc_app: Return
+  end
+  xrpc_app ->> xrpc_server: server.WaitForShutdown()
+  loop 满足 server 退出条件
+    xrpc_server ->> xrpc_server: 运行 terminate_function 检查退出条件
+  end
+  xrpc_server --> xrpc_app: Return
+  xrpc_app ->> xrpc_app: Destory()
+  xrpc_app -->> main: Return
+end
+```
+
+### ServiceAdapter Receive Data
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant io_thread as IO Thread
+participant handl_thread as Handle Thread
+participant server_transport as ServerTransport
+participant service_adapter as ServicAdapter
+participant concrete_service as ConcreteService
+
+io_thread ->> io_thread: reactor 感知到可读事件
+io_thread ->> io_thread: 根据 BindInfo.check_function 进行数据完整行检查甚至解析数据
+
+rect rgba(255, 255, 0, .2)
+  io_thread ->> service_adapter: HandleAnyMessage 处理收到的数据
+  service_adapter ->> service_adapter: 构造消息处理 Task
+  service_adapter ->> handl_thread: 提交至 Handle Thread 进行处理
+  handl_thread -->> service_adapter: 返回，任务可能不会立即处理
+  service_adapter -->> io_thread: 返回
+end
+
+rect rgba(0, 255, 255, .2)
+  handl_thread ->> concrete_service: Service.HandleTransportMessage 将消息交给 Service 进行处理
+  concrete_service ->> concrete_service: 分发消息至对应的 HTTP/RPC Handler 进行处理
+  concrete_service -->> handl_thread: 返回处理的结果
+
+  alt 如果需要立即返回数据
+    handl_thread ->> handl_thread: 返回数据，该步骤会使用 ServerTransport 向 IO Thread 提交任务
+  end
+end
+```
+
 ## XrpcServer
+
+XrpcServer 类管理了 Xrpc App 的 Server 启动和关闭，它可以包含了很多 Service，并且每个 Service 的都用 [ServiceAdapter](#serviceadapter) 进行表示。
 
 ### XrpcServer Initial
 
@@ -162,6 +264,9 @@ void XrpcApp::InitializeRuntime() {
 
   // ...
 
+  // 由应用层进行相关初始化，主要会进行 Service 的构建和注册。
+  int ret = Initialize();
+
   // server_ 开始监听
   server_->Start();
 }
@@ -178,13 +283,152 @@ void XrpcApp::DestoryRuntime() {
 }
 ```
 
+Xrpc Server 初始化主要是根据 Xrpc Config 进行 ServiceAdapter 的初始化，这主要是一些网络配置相关的初始化。
+
+```cpp
+XrpcServer::XrpcServer(const ServerConfig &server_config) : server_config_(server_config) {
+  InitializeServiceAdapter();
+}
+
+void XrpcServer::InitializeServiceAdapter() {
+  // 根据框架配置中 server 配置中的 service 配置信息，初始化 service 的相关信息
+  for (const auto& config : server_config_.services_config) {
+    BuildServiceAdapter(config);
+  }
+}
+
+ServiceAdapterPtr XrpcServer::BuildServiceAdapter(const ServiceConfig& config) {
+  // 根据配置文件得到 ServiceAdapter 的配置
+  ServiceAdapterOption option;
+  BuildServiceAdapterOption(config, option);
+
+  ServiceAdapterPtr service_adapter(new ServiceAdapter(option));
+  service_adapters_[config.service_name] = service_adapter;
+  return service_adapter;
+}
+```
+
+### RegistryService
+
+虽然 Xrpc Server 初始化时，已经将 ServiceAdapter 进行初始化了，但是 ServiceAdapter 还没有对网络事件进行具体处理 Service。为了让 ServiceAdapter 拥有一个进行消息处理的 Service，需要将 Service 初始化后通过 RegistryService 进行注册：
+
+```cpp
+void XrpcServer::RegistryService(const std::string &service_name, ServicePtr &service) {
+  auto service_adapter_it = service_adapters_.find(service_name);
+  if (service_adapter_it == service_adapters_.end()) {
+    XRPC_LOG_ERROR("service_name:" << service_name << " not found.");
+    XRPC_ASSERT(service_adapter_it != service_adapters_.end());
+  }
+
+  // 设置 ServiceAdapter 的 Service
+  service_adapter_it->second->SetService(service);
+  service->SetAdapter(service_adapter_it->second.get());
+}
+```
+
+### XrpcServer Start
+
+在一切准备就绪后，调用 Xrpc Server 的 Start 方法进行监听，等待网络事件触发：
+
+```cpp
+void XrpcServer::Start() {
+  for (const auto &iter : service_adapters_) {
+    iter.second->Listen();
+  }
+}
+```
+
+在 Start 后，应用层应该通过 `WaitForShutdown` 等待 Server 结束：
+
+```cpp
+void XrpcServer::WaitForShutdown() {
+  // 等待服务停止
+  while (!terminate_) {
+    // default thread sleep
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // 周期调用 terminate_function_ 检查是否满足停止 Server 的条件
+    if (terminate_function_) {
+      terminate_ = terminate_function_();
+    }
+  }
+}
+```
+
 ## ServiceAdapter
+
+Xrpc Config 中配置的 Service 都由 ServiceAdapter 进行管理和设置，也包含了对相关网络事件回调的设置：
+
+- ServiceAdapter 包含一个 ServerTransport，用于对网络进行监听、网络事件回调配置。
+- ServiceAdapter 包含一个 [Service](#service) 对象，Service 对象封装了网络事件的回调具体逻辑。
+
+ServiceAdapter 主要是记录配置文件，以及记录使用的线程池。
+
+ServiceAdapter 最重要的初始化方法是 SetService。
+
+### ServiceAdapter SetService
+
+SetService 用于向 ServiceAdapter 注册 Service 实例，本质上主要是进行 ServerTransport 的 BindInfo 设置，包括监听的端口、回调等：
+
+```cpp
+void ServiceAdapter::SetService(const ServicePtr& service) {
+  service_ = service;
+
+  xrpc::BindInfo bind_info;
+  bind_info.socket_type = option_.socket_type;
+  bind_info.ip = option_.ip;
+  bind_info.is_ipv6 = option_.is_ipv6;
+  bind_info.port = option_.port;
+  bind_info.network = option_.network;
+  bind_info.unix_path = option_.unix_path;
+  bind_info.protocol = option_.protocol;
+  bind_info.idle_time = option_.idle_time;
+  bind_info.max_conn_num = option_.max_conn_num;
+  bind_info.max_packet_size = option_.max_packet_size;
+  bind_info.recv_buffer_size = option_.recv_buffer_size;
+  bind_info.merge_send_data_size = option_.merge_send_data_size;
+  bind_info.accept_thread_num = option_.accept_thread_num;
+
+  // 下面四个函数在 HTTP Service / RPC Service 中，默认情况下都没有使用，除非进行人为甚至
+  bind_info.accept_function = service_->GetAcceptConnectionFunction();
+  bind_info.conn_establish_function = service_->GetConnectionEstablishFunction();
+  bind_info.conn_close_function = service_->GetConnectionCloseFunction();
+  bind_info.msg_writedone_function = service_->GetMessageWriteDoneFunction();
+
+  // server_codec_ 进行 Packet 检测甚至解码
+  bind_info.checker_function = std::bind(&ServerCodec::ZeroCopyCheck, server_codec_.get(),
+                                         _1, _2, _3);
+
+  // HandleAnyMessage 进行消息处理，主要是构造处理任务，提交至 Handle 线程池进行消息处理
+  bind_info.msg_handle_function = std::bind(&ServiceAdapter::HandleAnyMessage, this,
+                                            _1, _2);
+
+  xrpc::ServerTransportImpl::Options options;
+  options.thread_model_ = threadmodel_;
+  transport_ = std::make_unique<ServerTransportImpl>(options);
+
+  XRPC_ASSERT(transport_);
+  transport_->Bind(bind_info);
+}
+```
+
+### ServiceAdapter Listen
+
+Listen 会让 ServerTransport 进行监听，相应网络事件触发后，由 BindInfo 配置的回调进行处理。
+
+```cpp
+void ServiceAdapter::Listen() {
+  transport_->Listen();
+}
+```
 
 ### HandleAnyMessage
 
 ServiceAdapter 提供了默认了对请求数据进行处理的方法，即 HandleAnyMessage，对于大多数 Service 都会使用该方法进行处理，例如 HTTP Service、XRPC Service。
 
-HandleAnyMessage 回调是在 IO 线程触发的，为了不组塞 IO 线程，该函数会构建 task 并提交至 Handle 线程进行处理：
+HandleAnyMessage 回调是在 IO 线程触发的，为了不组塞 IO 线程，该函数会构建 task 并提交至 Handle 线程进行处理。
+
+HandleAnyMessage 本质上会将请求的数据交给 Service 的 HandleTransportMessage进行处理：
 
 ```cpp
 bool ServiceAdapter::HandleAnyMessage(const ConnectionPtr& conn, std::deque<std::any>& msg) {
@@ -552,28 +796,6 @@ void UnaryServiceHandler::HandleMessage(STransportReqMsg* recv, STransportRspMsg
 
 至此，可以使用两种方式来进行异步响应发起：
 
-- SendUnaryResponse(status), 对于 RPC Service 只会返回一个 status 信息，对于 HTTP Service 会影响 HTTP Headers：
-
-  ```cpp
-  void ServerContext::SendUnaryResponse(const xrpc::Status& status) {
-    status_ = status;
-  
-    // filter埋点控制器
-    GetFilterController().RunMessageServerFilters(FilterPoint::SERVER_PRE_SEND_MSG, this);
-
-    NoncontiguousBuffer send_data;
-
-    // 编码
-    adapter_->GetServerCodec()->ZeroCopyEncode(this, rsp_msg_, send_data);
-
-    auto* send_msg = new STransportRspMsg();
-    send_msg->basic_info = GetTransportBasicInfo();
-    send_msg->send_data = std::move(send_data);
-
-    SendTransportMsg(send_msg);
-  }
-  ```
-
 - SendUnaryResponse(status, rsp)，对于 RPC Service 有效，用于设置响应的 protobuf：
 
   ```cpp
@@ -616,3 +838,36 @@ void UnaryServiceHandler::HandleMessage(STransportReqMsg* recv, STransportRspMsg
     SendUnaryResponse(encode_status);
   }
   ```
+
+- SendUnaryResponse(status), 对于 RPC Service 只会返回一个 status 信息，对于 HTTP Service 会影响 HTTP Headers：
+
+  ```cpp
+  void ServerContext::SendUnaryResponse(const xrpc::Status& status) {
+    status_ = status;
+  
+    // filter埋点控制器
+    GetFilterController().RunMessageServerFilters(FilterPoint::SERVER_PRE_SEND_MSG, this);
+
+    NoncontiguousBuffer send_data;
+
+    // 编码
+    adapter_->GetServerCodec()->ZeroCopyEncode(this, rsp_msg_, send_data);
+
+    auto* send_msg = new STransportRspMsg();
+    send_msg->basic_info = GetTransportBasicInfo();
+    send_msg->send_data = std::move(send_data);
+
+    SendTransportMsg(send_msg);
+  }
+  ```
+
+对于 `SendTransportMsg` 会真的进行数据的发送：
+
+```cpp
+Status ServerContext::SendTransportMsg(STransportRspMsg* msg) {
+  // send msg
+  adapter_->SendMsg(msg);
+
+  return kDefaultStatus;
+}
+```
