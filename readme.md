@@ -1,5 +1,6 @@
 # 博客
 
+- [C4 model](posts/c4model/readme.md)
 - [OpenTracing](posts/open-tracing/readme.md)
 - [OAuth 2.0 Security Best Current Practice](posts/oauth-best-practice/readme.md)
 - [Reactor](posts/reactor/readme.md)

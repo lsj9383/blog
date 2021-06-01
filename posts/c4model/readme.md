@@ -1,0 +1,146 @@
+# C4 model
+
+<!-- TOC -->
+
+- [C4 model](#c4-model)
+    - [Overview](#overview)
+    - [Concepts](#concepts)
+        - [Persion](#persion)
+        - [Software System](#software-system)
+        - [Container](#container)
+        - [Component](#component)
+    - [Core Diagrams](#core-diagrams)
+        - [Level 1: System Context diagram](#level-1-system-context-diagram)
+        - [Level 2: Container diagram](#level-2-container-diagram)
+        - [Level 3: Component diagram](#level-3-component-diagram)
+        - [Level 3: Code](#level-3-code)
+    - [Tools](#tools)
+    - [References](#references)
+
+<!-- /TOC -->
+
+## Overview
+
+本文主要是 C4 Model 的学习笔记。
+
+## Concepts
+
+这里描述在 C4 Model 中存在的基本概念。
+
+### Persion
+
+人代表了你的软件系统人类用户。
+
+> A person represents one of the human users of your software system (e.g. actors, roles, personas, etc).
+
+### Software System
+
+软件系统是最高级别的抽象，并为用户传递有价值的东西。这包括了你正在构建的软件系统，以及依赖的软件系统。
+
+### Container
+
+C4 Model 中的容器并不意味着 Docker 等等的容器化技术，一个容器表示了一个`应用程序`或者`数据存储`。容器运行后，整个软件系统才能正常工作。
+
+以下是常见的容器：
+
+Container | Description
+-|-
+Server-side web application | 运行在 Apache Tomcat 上的 Java EE Web 程序，运行在 Microsoft IIS 上的 ASP.NET MVC 应用程序等等。
+Client-side web application | 使用 Angular、Backbone.JS、jQuery 等在 Web 浏览器中运行的 JavaScript 应用程序。
+Client-side desktop application | 使用 WPF 编写的 Windows 桌面应用程序、使用 Objective-C 编写的 OS X 桌面应用程序、使用 JavaFX 编写的跨平台桌面应用程序等。
+Mobile app | Apple iOS 应用程序、Android 应用程序、Microsoft Windows Phone 应用程序等。
+Server-side console application | 一个独立的批处理应用程序。
+Serverless function | 一个 serverless function。
+Database | 关系数据库管理系统、文档存储、图形数据库等中的模式或数据库。
+Blob or content store | Blob 存储或内容交付网络。
+File system | 完整的本地文件系统或较大的网络文件系统的一部分。
+Shell script | 用 Bash 等编写的单个 shell 脚本。
+
+**注意：**
+
+- Server-side web application，可以直接理解成 Server 应用进程。
+- Client-side web application，可以直接立即成 Web Javascript 程序。
+
+### Component
+
+组件是封装在明确接口后面的一组相关功能。如果您使用的是 Java 或 C# 之类的语言，那么可以认为组件是类的集合（一个组件不是一个类，而是一系列类的集合）。
+
+C4 Model 中，组件不可以单独部署（容器可以）。
+
+## Core Diagrams
+
+### Level 1: System Context diagram
+
+系统上下文图，用于描述各个软件系统和用户之间的关系，是文档可视化的一个良好的开端。
+
+在这类图中，重点应该放在表述人与软件系统的关系上，而不应该花精力在技术、协议、实现细节上。
+
+![bigbankplc-SystemContext](assets/bigbankplc-SystemContext.png)
+
+Term | Description
+-|-
+Scope | A single software system.
+Primary elements | 范围内的软件系统。
+Supporting elements | 与范围内软件系统有直接连接关系的所有 People 和其他依赖的软件系统。通常，这些软件系统在你的软件系统外，你对其没有所有权和责任。
+Intended audience | 软件开发团队内外的所有人，包括技术和非技术。
+Recommended for most teams | Yes.
+
+### Level 2: Container diagram
+
+通过 [Level 1: System Context diagram](#level-1-system-context-diagram) 了解你的系统环境后，下一步是放大你的系统边界，绘制一个`容器视图`。
+
+软件系统由多个容器组成，一个容器可以是 Server-side web application、Client-side web application 等等，请参考 [Container](#container)。
+
+容器是可以单独进行运行和部署的单元，它们执行代码或存储数据。
+
+容器视图显示较高程度的软件架构，并且也描述了各个容器的职责。除此外，它也显示了主要的技术选型，以及容器之间的通信方式。这是一个简单的，以技术为重点的视图。
+
+![bigbankplc-Containers](assets/bigbankplc-Containers.png)
+
+Term | Description
+-|-
+Scope | A single software system.
+Primary elements | 软件系统范围内的容器。
+Supporting elements | 直接使用容器的人和其他软件系统。
+Intended audience | 软件开发团队内外的所有人，包括软件架构师、开发人员和运营/支持人员。
+Recommended for most teams | Yes.
+
+### Level 3: Component diagram
+
+通过进一步放大和分解容器，以确定容器中的组件及相互作用。
+
+组件图显示了容器是如何由多个组件构成的，这些组件是什么，它们的职责以及实现细节。
+
+![bigbankplc-Containers](assets/bigbankplc-Components.png)
+
+Term | Description
+-|-
+Scope | A single software system.
+Primary elements | 容器范围内的组件。
+Supporting elements | 容器再加上直接连接到组件的人和系统。
+Intended audience | 软件架构师和开发人员。
+Recommended for most teams | No, only create component diagrams if you feel they add value, and consider automating their creation for long-lived documentation.
+
+### Level 3: Code
+
+代码
+
+![bigbankplc-Classes](assets/bigbankplc-Classes.png)
+
+Term | Description
+-|-
+Scope | A single component.
+Primary elements | 代码元素（例如类、接口、对象、函数、数据库表等）。
+Intended audience | 软件架构师和开发人员。
+Recommended for most teams | No, only create component diagrams if you feel they add value, and consider automating their creation for long-lived documentation.
+
+## Tools
+
+使用 Draw.io 画 C4 Model 是简单和美丽的，有两种简单的使用 draw.io 的方式：
+
+- 浏览器地址栏输入 <https://app.diagrams.net/> 或 <draw.io>
+- 使用 vscode 的 draw.io 插件：`Draw.io Integration`。
+
+## References
+
+1. [The C4 model for visualising software architecture](https://c4model.com/)
