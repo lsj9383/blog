@@ -13,7 +13,7 @@
         - [Level 1: System Context diagram](#level-1-system-context-diagram)
         - [Level 2: Container diagram](#level-2-container-diagram)
         - [Level 3: Component diagram](#level-3-component-diagram)
-        - [Level 3: Code](#level-3-code)
+        - [Level 4: Code](#level-4-code)
     - [Tools](#tools)
     - [References](#references)
 
@@ -121,9 +121,11 @@ Supporting elements | 容器再加上直接连接到组件的人和系统。
 Intended audience | 软件架构师和开发人员。
 Recommended for most teams | No, only create component diagrams if you feel they add value, and consider automating their creation for long-lived documentation.
 
-### Level 3: Code
+### Level 4: Code
 
-代码
+正如 [Component](#component) 所说，组件是类的集合，当放大一个组件，本质上就是观察类和类之间的关系，因此在这一层级使用 UML 图、实体关系图或类似的其他表示类关系的可视化方（推荐 UML 图，常用且直观）。
+
+除了最重要或最复杂的组件外，不建议将这种详细程度用于任何其他组件。
 
 ![bigbankplc-Classes](assets/bigbankplc-Classes.png)
 
