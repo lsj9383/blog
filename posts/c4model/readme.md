@@ -1,8 +1,8 @@
-# C4 model
+# C4 Model
 
 <!-- TOC -->
 
-- [C4 model](#c4-model)
+- [C4 Model](#c4-model)
     - [Overview](#overview)
     - [Concepts](#concepts)
         - [Person](#person)
@@ -156,17 +156,56 @@ Recommended for most teams | No, only create component diagrams if you feel they
 
 ## Supplementary diagrams
 
+在对 [Core Diagrams](#core-diagrams) 有了了解后，可以对 C4 Model 进行补充，以展示你设计系统的其他方面。
+
 ### System Landscape diagram
+
+C4 Model 提供了对单一软件系统的描述，现实中软件系统之间并非是孤立的（虽然 C4 Model 的软件系统之间确实存在关系，但是仍然是将其各自单独看待），而是彼此之间互为一个整体，特别是如果你负责一组软件系统的设计室，这种软件系统的整体性更为突出。
+
+为此，只需要在 C4 Model 的最外层，添加一个框，将联系紧密的软件系统组成一个整体。通过这样的方式可以显示组织的边界，内部外部用户，以及内部外部系统。
 
 ![bigbankplc-SystemLandscape](assets/bigbankplc-SystemLandscape.png)
 
+Views | Description
+-|-
+Scope | An enterprise.
+Primary elements | 企业范围内相关的人和软件系统。
+Intended audience | 软件开发团队内外的技术和非技术人员。
+
 ### Dynamic diagram
+
+动态图用于显示静态模型中的元素如何协作，以描述相关示例、系统功能等。
+
+动态图基于 UML 通信图，其作用有点类似于 UML 时序图。
 
 ![bigbankplc-SignIn](assets/bigbankplc-SignIn.png)
 
+Views | Description
+-|-
+Scope | An enterprise, software system or container.
+Primary elements | 企业范围内相关的人和软件系统。
+Intended audience | 软件开发团队内外的技术和非技术人员。
+
 ### Deployment diagram
 
+部署图用于说明静态模型中的软件系统和容器如何映射到基础设施。
+
+部署图类似于 UML 部署图，但 C4 Model 的部署图更为简化。
+
+部署节点常见的有：
+
+- 物理基础设施（例如物理服务器或设备）
+- 虚拟化基础设施（例如 IaaS、PaaS、虚拟机）
+- 容器化基础设施（例如 Docker 容器）
+- 执行环境（例如数据库服务器、Java EE web/应用服务器、Microsoft IIS）等。
+
 ![bigbankplc-LiveDeployment](assets/bigbankplc-LiveDeployment.png)
+
+Views | Description
+-|-
+Scope | One or more software systems.
+Primary elements | 部署节点、软件系统实例、容器实例。
+Intended audience | 软件开发团队内外的技术人员。
 
 ## Notation
 
