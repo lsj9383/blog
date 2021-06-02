@@ -5,7 +5,7 @@
 - [C4 model](#c4-model)
     - [Overview](#overview)
     - [Concepts](#concepts)
-        - [Persion](#persion)
+        - [Person](#person)
         - [Software System](#software-system)
         - [Container](#container)
         - [Component](#component)
@@ -21,21 +21,34 @@
 
 ## Overview
 
-本文主要是 C4 Model 的学习笔记。
+C4 Model 是一种方法论，用于帮助软件开发团队描述和交流软甲架构。C4 Model 可以创建代码地图，并具有不同的缩放级别（地图可以放大放小，就像 Google 地图可以对详细程度进行缩放），而不同的缩放级别会站在不同的层面描述设计。
+
+> The C4 model was created as a way to help software development teams describe and communicate software architecture, both during up-front design sessions and when retrospectively documenting an existing codebase. It's a way to create maps of your code, at various levels of detail, in the same way you would use something like Google Maps to zoom in and out of an area you are interested in.
+
+C4 Model 核心存在四个缩放级别：
+
+- Context，由多个相关联的软件系统组成，描述系统之间的关系。
+- Containers，一个软件系统有多个 Containers，每个 Containers 都是一个可以单独运行的进程，描述一个系统中不同进程的交互和运行方式。
+- Components，一个 Container 有多个 Components，描述一个进程所使用的组件与技术细节。
+- Code，描述的是 Component 中的类关系，通常用 UML 类图进行表示。
+
+![c4-overview](assets/c4-overview.png)
 
 ## Concepts
 
-这里描述在 C4 Model 中存在的基本概念。
+这里描述在 C4 Model 中存在的基本概念和角色。
 
-### Persion
+### Person
 
-人代表了你的软件系统人类用户。
+Person 代表了你所设计的软件系统的人类用户。
 
 > A person represents one of the human users of your software system (e.g. actors, roles, personas, etc).
 
 ### Software System
 
 软件系统是最高级别的抽象，并为用户传递有价值的东西。这包括了你正在构建的软件系统，以及依赖的软件系统。
+
+> A software system is the highest level of abstraction and describes something that delivers value to its users, whether they are human or not. This includes the software system you are modelling, and the other software systems upon which your software system depends (or vice versa). In many cases, a software system is "owned by" a single software development team.
 
 ### Container
 
@@ -77,7 +90,7 @@ C4 Model 中，组件不可以单独部署（容器可以）。
 
 ![bigbankplc-SystemContext](assets/bigbankplc-SystemContext.png)
 
-Term | Description
+Views | Description
 -|-
 Scope | A single software system.
 Primary elements | 范围内的软件系统。
@@ -97,7 +110,7 @@ Recommended for most teams | Yes.
 
 ![bigbankplc-Containers](assets/bigbankplc-Containers.png)
 
-Term | Description
+Views | Description
 -|-
 Scope | A single software system.
 Primary elements | 软件系统范围内的容器。
@@ -113,7 +126,7 @@ Recommended for most teams | Yes.
 
 ![bigbankplc-Containers](assets/bigbankplc-Components.png)
 
-Term | Description
+Views | Description
 -|-
 Scope | A single software system.
 Primary elements | 容器范围内的组件。
@@ -129,7 +142,7 @@ Recommended for most teams | No, only create component diagrams if you feel they
 
 ![bigbankplc-Classes](assets/bigbankplc-Classes.png)
 
-Term | Description
+Views | Description
 -|-
 Scope | A single component.
 Primary elements | 代码元素（例如类、接口、对象、函数、数据库表等）。
