@@ -14,6 +14,7 @@
         - [Level 2: Container diagram](#level-2-container-diagram)
         - [Level 3: Component diagram](#level-3-component-diagram)
         - [Level 4: Code](#level-4-code)
+    - [Notation](#notation)
     - [Tools](#tools)
     - [References](#references)
 
@@ -148,6 +149,18 @@ Scope | A single component.
 Primary elements | 代码元素（例如类、接口、对象、函数、数据库表等）。
 Intended audience | 软件架构师和开发人员。
 Recommended for most teams | No, only create component diagrams if you feel they add value, and consider automating their creation for long-lived documentation.
+
+## Notation
+
+C4 Model 并没有规定任何特定符号，但不同的 C4 Model 绘制可能会自定义相关的符号。
+
+一种简单的适用于白板、纸张、便签的符号如下（这并非规定，而是一个示例）：
+
+![notation-person](assets/notation-person.png =100x20)
+![notation-person](assets/notation-ss.png)
+![notation-person](assets/notation-container.png)
+![notation-person](assets/notation-component.png)
+![notation-person](assets/notation-rela.png)
 
 ## Tools
 
