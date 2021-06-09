@@ -104,7 +104,7 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
 
 ## Bazel
 
-Bazel 是 Google 提供的编译工具，我们如何在 Bazel 中进行 Protobuf 插件的生成和使用呢？
+Bazel 是 Google 提供的编译工具，我们如何使用 Bazel 引入 Protobuf 插件进行编译呢？
 
 ## References
 
