@@ -1,0 +1,42 @@
+#!/data/workspace/proto/venv/bin/python
+
+import sys
+
+from google.protobuf.compiler import plugin_pb2 as plugin
+from google.protobuf.descriptor_pb2 import DescriptorProto, EnumDescriptorProto
+
+
+def generate_code(request, response):
+    parts = []
+    for f in request.proto_file:
+        parts.append(f.name + "\n")
+        parts.append("  Messages: \n")
+        for m in f.message_type:
+            parts.append("    " + m.name + "\n")
+        parts.append("  Services: \n")
+        for s in f.service:
+            parts.append("    " + s.name + "\n")
+    content = "".join(parts)
+
+    # 打印调试信息, 因为标准输出是给 protoc 父进程获取用的，因此这里使用标准错误输出进行打印
+    sys.stderr.write(content)
+
+    # 生成文件和内容
+    response.file.add()
+    response.file[0].name = 'proto.profile'
+    response.file[0].content = content
+
+
+if __name__ == '__main__':
+    # 从标准输入中获取二进制数据，并解析成 CodeGeneratorRequest 结构
+    data = sys.stdin.buffer.read()
+    request = plugin.CodeGeneratorRequest()
+    request.ParseFromString(data)
+
+    # 构建 CodeGeneratorResponse，用于设置响应
+    response = plugin.CodeGeneratorResponse()
+    generate_code(request, response)
+
+    # 序列化 CodeGeneratorResponse，通过标准输出返回给 protoc 父进程。
+    output = response.SerializeToString()
+    sys.stdout.buffer.write(output)
