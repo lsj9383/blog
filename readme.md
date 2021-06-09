@@ -1,5 +1,6 @@
 # 博客
 
+- [Protobuf Plugin Program](posts/protobuf-plugin-program/readme.md)
 - [C4 Model](posts/c4model/readme.md)
 - [OpenTracing](posts/open-tracing/readme.md)
 - [OAuth 2.0 Security Best Current Practice](posts/oauth-best-practice/readme.md)
