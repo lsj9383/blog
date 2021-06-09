@@ -5,9 +5,12 @@
 - [Protobuf Plugin Program](#protobuf-plugin-program)
     - [Overview](#overview)
     - [Quick Start](#quick-start)
-    - [Compile Protoc Plugin](#compile-protoc-plugin)
+    - [Working Principle](#working-principle)
+    - [Compile Protocbuf Plugin C++](#compile-protocbuf-plugin-c)
     - [How To Use Plugin](#how-to-use-plugin)
-    - [Bazel](#bazel)
+    - [Bazel Tool](#bazel-tool)
+        - [Bazel Compile Plugin](#bazel-compile-plugin)
+        - [Bazel Compile Protobuf By Plugin](#bazel-compile-protobuf-by-plugin)
     - [References](#references)
 
 <!-- /TOC -->
@@ -41,7 +44,54 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
   ```
 
 - 接着，我们提供一个简单的 `.proto` 文件，请参考 [hello.proto](quic-start/hello.proto)。
-- 我们提供 Python 脚本 [protoc-gen-custom](quic-start/protoc-gen-custom)。
+- 我们提供 Python 脚本 [protoc-gen-custom](quic-start/protoc-gen-custom)：
+
+  ```py
+  #!/data/workspace/proto/venv/bin/python
+
+  import sys
+
+  from google.protobuf.compiler import plugin_pb2 as plugin
+  from google.protobuf.descriptor_pb2 import DescriptorProto, EnumDescriptorProto
+
+
+  def generate_code(request, response):
+      parts = []
+      for f in request.proto_file:
+          parts.append(f.name + "\n")
+          parts.append("  Messages: \n")
+          for m in f.message_type:
+              parts.append("    " + m.name + "\n")
+          parts.append("  Services: \n")
+          for s in f.service:
+              parts.append("    " + s.name + "\n")
+      content = "".join(parts)
+
+      # 打印调试信息, 因为标准输出是给 protoc 父进程获取用的，因此这里使用标准错误输出进行打印
+      sys.stderr.write(content)
+
+      # 生成文件和内容
+      response.file.add()
+      response.file[0].name = 'proto.profile'
+      response.file[0].content = content
+
+
+  if __name__ == '__main__':
+      # 从标准输入中获取二进制数据，并解析成 CodeGeneratorRequest 结构
+      data = sys.stdin.buffer.read()
+      request = plugin.CodeGeneratorRequest()
+      request.ParseFromString(data)
+
+      # 构建 CodeGeneratorResponse，用于设置响应
+      response = plugin.CodeGeneratorResponse()
+      generate_code(request, response)
+
+      # 序列化 CodeGeneratorResponse，通过标准输出返回给 protoc 父进程。
+      output = response.SerializeToString()
+      sys.stdout.buffer.write(output)
+
+  ```
+
 - 最后，我们可以在 protoc 运行时指定插件进程（Python 插件脚本名叫 `protoc-gen-custom`，文件名没有 `.py` 后缀）：
 
   ```sh
@@ -75,11 +125,13 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
 
 对于 CodeGeneratorRequest 和 CodeGeneratorResponse 所暴露的接口可以参考 [protobuf plugin.pb.h](https://developers.google.com/protocol-buffers/docs/reference/cpp/google.protobuf.compiler.plugin.pb?hl=ja)。
 
-上述工作方式入下图所示：
+## Working Principle
+
+Protobuf Plugin 的工作流程大致如下图所示：
 
 ![python-profile](assets/python-profile.png)
 
-## Compile Protoc Plugin
+## Compile Protocbuf Plugin C++
 
 ## How To Use Plugin
 
@@ -102,9 +154,39 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
   protoc --xrpc_out=OUT_DIR
   ```
 
-## Bazel
+## Bazel Tool
 
-Bazel 是 Google 提供的编译工具，我们如何使用 Bazel 引入 Protobuf 插件进行编译呢？
+Bazel 是 Google 提供的编译工具，我们期望使用 Bazel 解决两个问题：
+
+- 如何使用 Bazel 编译 Protobuf Plugin C++。
+- 如何使用 Bazel 引入 Protobuf Plugin 编译 `.proto` 文件？
+
+### Bazel Compile Plugin
+
+在 Bazel 的 WORKSPACE 中引入编译依赖 protobuf:
+
+```bazel
+git_repository(
+  name = "protobuf",
+  remote = "https://github.com/google/protobuf",
+  commit = "e8ae137c96444ea313485ed1118c5e43b2099cf1" #v3.0.0
+)
+```
+
+再在 Bazel 的 BUILD 中指定插件的依赖和编译规则：
+
+```bazel
+cc_binary(
+  name = "protoc-gen-demo",
+  srcs = ["protoc-gen-demo.cc"],
+  deps = [
+    "@protobuf//:protobuf",
+    "@protobuf//:protoc_lib",
+  ],
+)
+```
+
+### Bazel Compile Protobuf By Plugin
 
 ## References
 
