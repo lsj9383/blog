@@ -9,7 +9,7 @@
     - [How To Use Plugin](#how-to-use-plugin)
     - [Bazel Tool](#bazel-tool)
         - [Bazel Compile Plugin](#bazel-compile-plugin)
-        - [Bazel Compile Protobuf By Plugin](#bazel-compile-protobuf-by-plugin)
+        - [Bazel Compile Protobuf](#bazel-compile-protobuf)
     - [References](#references)
 
 <!-- /TOC -->
@@ -265,14 +265,16 @@ INFO: Build completed successfully, 1 total action
 
 同样，我们也提供了一个简单的 `.proto` 文件 [hello.proto](bazel-compile-plugin/hello.proto)。
 
-我们使用这个 `protoc-gen-demo` 插件进行处理 `.proto` 文件：
+我们使用这个 `protoc-gen-demo` 插件编译 `.proto` 文件：
 
 ```sh
 $ protoc --plugin=protoc-gen-demo=bazel-bin/protoc-gen-demo --demo_out=. hello.proto 
 --custom_out: hello.proto: ========= IT IS A TEST ========
 ```
 
-### Bazel Compile Protobuf By Plugin
+具体代码可以参考 [bazel-compile-plugin](bazel-compile-plugin/readme.md)。
+
+### Bazel Compile Protobuf
 
 ## References
 
