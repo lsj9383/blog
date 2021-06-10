@@ -5,8 +5,7 @@
 - [Protobuf Plugin Program](#protobuf-plugin-program)
     - [Overview](#overview)
     - [Quick Start](#quick-start)
-    - [Working Principle](#working-principle)
-    - [Compile Protocbuf Plugin C++](#compile-protocbuf-plugin-c)
+    - [Compile Protobuf Plugin C++](#compile-protobuf-plugin-c)
     - [How To Use Plugin](#how-to-use-plugin)
     - [Bazel Tool](#bazel-tool)
         - [Bazel Compile Plugin](#bazel-compile-plugin)
@@ -25,6 +24,18 @@ Protobuf 官方似乎并没有提供详细的插件编程入门指导和示例�
 - 插件代码如何去解析 Protobuf 文件，Protobuf 为插件开发者提供了什么接口。
 
 本文将带着这些问题，对 Protobuf 插件编程进行总结和梳理。
+
+本文并不是 Protobuf 如何使用，`.proto` 如何编译的文档，对于 Protobuf 的使用，protoc 的原生编译，请参考 [Protobuf Overview](https://developers.google.com/protocol-buffers/docs/overview)。
+
+Protobuf Plugin 的工作流程方式是非常简单的：
+
+- protoc 进程解析 `.proto` 文件后，会通过子进程的方式拉起插件进程。
+- protoc 进程通过标准输入和输出与子进程进行通信。
+- 插件子进程通过标准输入获得 protoc 提供的 `.proto` 数据结构，并通过标准输出，告诉 protoc 进程如何生成文件。
+- protoc 进程获悉子插件进程提供的数据。
+- protoc 进程生成文件。
+
+![python-profile](assets/python-profile.png)
 
 ## Quick Start
 
@@ -125,13 +136,7 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
 
 对于 CodeGeneratorRequest 和 CodeGeneratorResponse 所暴露的接口可以参考 [protobuf plugin.pb.h](https://developers.google.com/protocol-buffers/docs/reference/cpp/google.protobuf.compiler.plugin.pb?hl=ja)。
 
-## Working Principle
-
-Protobuf Plugin 的工作流程大致如下图所示：
-
-![python-profile](assets/python-profile.png)
-
-## Compile Protocbuf Plugin C++
+## Compile Protobuf Plugin C++
 
 ## How To Use Plugin
 
@@ -156,21 +161,54 @@ Protobuf Plugin 的工作流程大致如下图所示：
 
 ## Bazel Tool
 
-Bazel 是 Google 提供的编译工具，我们期望使用 Bazel 解决两个问题：
+Bazel 是 Google 提供的编译工具，很多工程中我们都会使用 Bazel 进行编译。这不是一个 Bazel 的教程，对于 Bazel 的更多信息请访问 [Bazel](https://bazel.build/)。
 
-- 如何使用 Bazel 编译 Protobuf Plugin C++。
+在 Protoc Plugin 中，我们期望使用 Bazel 解决两个问题：
+
+- 如何使用 Bazel 编译 Protobuf Plugin C++？
 - 如何使用 Bazel 引入 Protobuf Plugin 编译 `.proto` 文件？
 
 ### Bazel Compile Plugin
 
-在 Bazel 的 WORKSPACE 中引入编译依赖 protobuf:
+在 Bazel 的 WORKSPACE 中引入编译依赖的 protobuf、zlib 等仓库:
 
 ```bazel
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
 git_repository(
   name = "protobuf",
   remote = "https://github.com/google/protobuf",
-  commit = "e8ae137c96444ea313485ed1118c5e43b2099cf1" #v3.0.0
+  branch = "master"
 )
+
+http_archive(
+    name = "rules_python",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.2.0/rules_python-0.2.0.tar.gz",
+    sha256 = "778197e26c5fbeb07ac2a2c5ae405b30f6cb7ad1f5510ea6fdac03bded96cc6f",
+)
+
+http_archive(
+  name = "zlib",
+  build_file = "@protobuf//:third_party/zlib.BUILD",
+  sha256 = "c3e5e9fdd5004dcb542feda5ee4f0ff0744628baf8ed2dd5d66f8ca1197cb1a1",
+  strip_prefix = "zlib-1.2.11",
+  urls = [
+    "https://mirror.bazel.build/zlib.net/zlib-1.2.11.tar.gz",
+    "https://zlib.net/zlib-1.2.11.tar.gz",
+  ],
+)
+
+http_archive(
+  name = "bazel_skylib",
+  urls = [
+    "https://github.com/bazelbuild/bazel-skylib/releases/download/1.0.3/bazel-skylib-1.0.3.tar.gz",
+    "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.0.3/bazel-skylib-1.0.3.tar.gz",
+  ],
+  sha256 = "1c531376ac7e5a180e0237938a2536de0c54d93f5c278634818e0efc952dd56c",
+)
+load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
+bazel_skylib_workspace()
 ```
 
 再在 Bazel 的 BUILD 中指定插件的依赖和编译规则：
@@ -184,6 +222,54 @@ cc_binary(
     "@protobuf//:protoc_lib",
   ],
 )
+```
+
+再提供插件代码 `protoc-gen-demo.cc` 就能进行编译了，现在提供一个处理 `.proto` 固定出错的一个插件代码：
+
+```cpp
+#include <iostream>
+
+#include "google/protobuf/compiler/code_generator.h"
+#include "google/protobuf/compiler/plugin.h"
+#include "google/protobuf/compiler/plugin.pb.h"
+#include "google/protobuf/descriptor.h"
+
+class DemoGenerator : public google::protobuf::compiler::CodeGenerator {
+ public:
+  bool Generate(const google::protobuf::FileDescriptor* file, const std::string& parameter,
+                google::protobuf::compiler::GeneratorContext* context,
+                std::string* error) const override {
+    error->append("========= IT IS A TEST ========");
+    return false;
+  }
+};
+
+int main(int argc, char* argv[]) {
+  DemoGenerator generator;
+  return google::protobuf::compiler::PluginMain(argc, argv, &generator);
+}
+```
+
+最后，我们可以进行 bazel 的编译了：
+
+```sh
+$ bazel build :protoc-gen-demo
+INFO: Analyzed target //plugin:protoc-gen-demo (0 packages loaded, 0 targets configured).
+INFO: Found 1 target...
+Target //plugin:protoc-gen-demo up-to-date:
+  bazel-bin/plugin/protoc-gen-demo
+INFO: Elapsed time: 0.063s, Critical Path: 0.00s
+INFO: 1 process: 1 internal.
+INFO: Build completed successfully, 1 total action
+```
+
+同样，我们也提供了一个简单的 `.proto` 文件 [hello.proto](bazel-compile-plugin/hello.proto)。
+
+我们使用这个 `protoc-gen-demo` 插件进行处理 `.proto` 文件：
+
+```sh
+$ protoc --plugin=protoc-gen-demo=bazel-bin/protoc-gen-demo --demo_out=. hello.proto 
+--custom_out: hello.proto: ========= IT IS A TEST ========
 ```
 
 ### Bazel Compile Protobuf By Plugin
