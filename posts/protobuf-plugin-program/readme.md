@@ -10,6 +10,8 @@
     - [How To Use Plugin](#how-to-use-plugin)
     - [Bazel Tool](#bazel-tool)
     - [Appendix: Plugin API](#appendix-plugin-api)
+        - [CodeGeneratorRequest](#codegeneratorrequest)
+        - [CodeGeneratorResponse](#codegeneratorresponse)
     - [Appendix: References](#appendix-references)
 
 <!-- /TOC -->
@@ -286,6 +288,144 @@ $ protoc --plugin=protoc-gen-demo=bazel-bin/protoc-gen-demo --demo_out=. hello.p
 具体代码可以参考 [bazel-compile-plugin](bazel-compile-plugin/readme.md)。
 
 ## Appendix: Plugin API
+
+这里列出 [protobuf plugin.pb.h](https://developers.google.com/protocol-buffers/docs/reference/cpp/google.protobuf.compiler.plugin.pb?hl=ja) 中提供的文件内容，插件所用的 API 就是这些 protobuf 所提供的。
+
+### CodeGeneratorRequest
+
+CodeGeneratorRequest 是为插件提供的 protobuf 解析内容数据结构。
+
+```proto
+message CodeGeneratorRequest {
+  // 在命令行中明确列出的 .proto 文件。 
+  // 插件应该只为这些文件生成代码。 
+  // 每个文件的=描述符将包含在下面的 proto_file 中。
+  repeated string file_to_generate = 1;
+  optional string parameter = 2;                    // 通过命令行传递的参数
+  optional Version compiler_version = 3;            // Protobuf 编译器版本
+  repeated FileDescriptorProto proto_file = 15;
+}
+
+// Protobuf 文件解析的数据结构
+message FileDescriptorProto {
+  optional string name = 1;                 // file name, relative to root of source tree
+  optional string package = 2;              // 包名，例如 "foo", "foo.bar", etc.
+  repeated string dependency = 3;           // 该文件所导入的 protobuf (imported)
+  repeated int32 public_dependency = 10;
+  repeated int32 weak_dependency = 11;
+
+  // All top-level definitions in this file.
+  repeated DescriptorProto message_type = 4;      // message Message {}
+  repeated EnumDescriptorProto enum_type = 5;     // enum Enum {}
+  repeated ServiceDescriptorProto service = 6;    // service Service {}
+  repeated FieldDescriptorProto extension = 7;
+
+  optional FileOptions options = 8;               // option x = y
+  optional SourceCodeInfo source_code_info = 9;
+  optional string syntax = 12;                    // "proto2" or "proto3".
+}
+
+// Message 语句块解析的数据结构
+message DescriptorProto {
+  optional string name = 1;
+
+  repeated FieldDescriptorProto field = 2;
+  repeated FieldDescriptorProto extension = 6;
+  repeated DescriptorProto nested_type = 3;       // 嵌套的 Message，例如 message Message { message Message2 {} }
+  repeated EnumDescriptorProto enum_type = 4;
+
+  message ExtensionRange {
+    optional int32 start = 1;  // Inclusive.
+    optional int32 end = 2;    // Exclusive.
+
+    optional ExtensionRangeOptions options = 3;
+  }
+  repeated ExtensionRange extension_range = 5;
+  repeated OneofDescriptorProto oneof_decl = 8;
+  optional MessageOptions options = 7;
+
+  // Range of reserved tag numbers. Reserved tag numbers may not be used by
+  // fields or extension ranges in the same message. Reserved ranges may
+  // not overlap.
+  message ReservedRange {
+    optional int32 start = 1;  // Inclusive.
+    optional int32 end = 2;    // Exclusive.
+  }
+  repeated ReservedRange reserved_range = 9;
+  // Reserved field names, which may not be used by fields in the same message.
+  // A given name may only be reserved once.
+  repeated string reserved_name = 10;
+}
+
+message ServiceDescriptorProto {
+  optional string name = 1;
+  repeated MethodDescriptorProto method = 2;
+  optional ServiceOptions options = 3;
+}
+
+message MethodDescriptorProto {
+  optional string name = 1;
+  optional string input_type = 2;
+  optional string output_type = 3;
+
+  optional MethodOptions options = 4;
+
+  optional bool client_streaming = 5 [[]default = false];
+  optional bool server_streaming = 6 [[]default = false];
+}
+
+
+message ServiceOptions {
+  optional bool deprecated = 33 [[]default = false];
+  repeated UninterpretedOption uninterpreted_option = 999;
+  extensions 1000 to max;
+}
+
+message MethodOptions {
+  optional bool deprecated = 33 [[]default = false];
+  optional IdempotencyLevel idempotency_level = 34 [[]default = IDEMPOTENCY_UNKNOWN];
+  repeated UninterpretedOption uninterpreted_option = 999;
+  extensions 1000 to max;
+}
+
+message UninterpretedOption {
+  message NamePart {
+    required string name_part = 1;
+    required bool is_extension = 2;
+  }
+  repeated NamePart name = 2;
+
+  optional string identifier_value = 3;
+  optional uint64 positive_int_value = 4;
+  optional int64 negative_int_value = 5;
+  optional double double_value = 6;
+  optional bytes string_value = 7;
+  optional string aggregate_value = 8;
+}
+```
+
+### CodeGeneratorResponse
+
+CodeGeneratorResponse 是插件生成的，指示 protoc 生成是否失败，以及如何生成文件。
+
+```proto
+
+message CodeGeneratorResponse {
+  // File 表示了生成的单个文件
+  message File {
+    optional string name = 1;
+    optional string insertion_point = 2;
+    optional string content = 15;
+    optional GeneratedCodeInfo generated_code_info = 16;
+  }
+
+  // 错误信息，若非空则认为生成失败
+  // protoc 判断 error 非空，会以非 0 错误码退出，并打印 error 字符串内容
+  optional string error = 1;
+  optional uint64 supported_features = 2;
+  repeated File file = 15;
+}
+```
 
 ## Appendix: References
 
