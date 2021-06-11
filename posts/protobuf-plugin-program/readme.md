@@ -156,7 +156,7 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
 
 ## How To Use Plugin
 
-将 Plugin 的二进制文件编译好后，需要在 protoc 编译时进行使用，有两种方式指定插件：
+将 Plugin 的进程文件准备好后，需要在 protoc 编译时进行使用，有两种方式指定插件：
 
 - 通过 `--plugin` 参数，指定插件二进制文件路径：
 
