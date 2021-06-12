@@ -21,6 +21,8 @@
     - [Closing the Connection](#closing-the-connection)
     - [Error Handling in UTF-8-Encoded Data](#error-handling-in-utf-8-encoded-data)
     - [Extensions](#extensions)
+        - [Negotiating Extensions](#negotiating-extensions)
+        - [Known Extensions](#known-extensions)
     - [Security Considerations](#security-considerations)
         - [Attacks On Infrastructure](#attacks-on-infrastructure)
     - [References](#references)
@@ -68,7 +70,7 @@
 - 上述 `Sec-WebSocket-Protocol` 指定了子协议，Client 通知 Server 期望使用的子协议，Server 根据自己的支持情况和优先级选择其中一个进行返回。
   - 子协议可以自定义，也可以从 [IANA WebSocket Subprotocol Name Registry](https://www.iana.org/assignments/websocket/websocket.xml#subprotocol-name) 中选择。
 - WebSocket 还存在协议扩展头部 `Sec-WebSocket-Extensions`（上面没有给出），由 Client 提供，Server 根据自己的情况从中选择支持的返回（可以选择多个）。
-  - Extensions 可以自定义，也可以从 [IANA WebSocket Extension Name Registry](https://www.iana.org/assignments/websocket/websocket.xml#extension-name) 中选择。
+  - Extensions 必须从 [IANA WebSocket Extension Name Registry](https://www.iana.org/assignments/websocket/websocket.xml#extension-name) 中选择（不能自定义）。
 
 
 在握手成功以后，客户端和服务端传输的数据来回传输的数据单位，我们在规范中称为消息（Messages）。
@@ -594,6 +596,84 @@ opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
 这一规则在开始握手时，或者后续的数据交换中均生效。
 
 ## Extensions
+
+Extensions 为 WebSocket 提供更丰富的能力，并且是可插拔的。
+
+WebSocket Client 可能会请求 Extensions，Server 可能会接受其中某些甚至全部的 Extensions。
+
+Server 一定不能接受 Client 未请求的 Extensions。
+
+Client 请求 Extensions 时还可以提供 Extensions Parameters。
+
+### Negotiating Extensions
+
+Client 通过 `Sec-WebSocket-Extensions` Header 来请求 Extensions，并且遵守 HTTP 的规则。
+
+Sec-WebSocket-Extensions 需要符合以下 ABNF 语法：
+
+```abnf
+Sec-WebSocket-Extensions = extension-list
+extension-list = 1#extension
+extension = extension-token *( ";" extension-param )
+extension-token = registered-token
+registered-token = token
+extension-param = token [ "=" (token | quoted-string) ]
+    ;When using the quoted-string syntax variant, the value
+    ;after quoted-string unescaping MUST conform to the
+    ;'token' ABNF.
+```
+
+当 Client 或 Server 收到的 `Sec-WebSocket-Extensions` 不符合上面 ABNF 语法时，收到的一方应该立即关闭 WebSocket 连接。
+
+可以使用多个 `Sec-WebSocket-Extensions` Headers 来提供多个 Extensions，例如：
+
+```text
+Sec-WebSocket-Extensions: foo
+Sec-WebSocket-Extensions: bar; baz=2
+```
+
+也可以将其合并为一行：
+
+```text
+Sec-WebSocket-Extensions: foo, bar; baz=2
+```
+
+extension-token 是不能自定义，他们需要在 INAN 中注册过，参考 [Known Extensions](#known-extensions)。
+
+需要注意的是，Extensions 的顺序是重要的：
+
+- 多个扩展之间可以进行交互，并且他们在 Extensions 的文档总进行定义，但是有些扩展之间并没有定义交互方式。
+- Client 提供的 Extensions 顺序是按 Client 希望使用的优先级进行排列的。
+- Server 提供的 Extensions 列表代表实际用于连接的 Extensions。
+- 如果 Extensions 会对数据或 Frame 进行修改，则认为修改的顺序应为 Server 提供的 Extensions 列表顺序。
+
+例如 Server 响应了两个 Extensions：
+
+```text
+Sec-WebSocket-Extensions: foo, bar
+```
+
+两个 Extensions 都会对 data 进行操作，则 Client 和 Server 都应该操作的结果是：`bar(foo(data))`。
+
+这是一个 Server 返回的可接受的 Extensions 示例：
+
+```text
+Sec-WebSocket-Extensions: deflate-stream
+Sec-WebSocket-Extensions: mux; max-channels=4; flow-control, deflate-stream
+Sec-WebSocket-Extensions: private-extension
+```
+
+每一个 Extension Parameters 的解释由该 Extension 提供。
+
+### Known Extensions
+
+Extensions 提供了为 WebSocket 协议附加其他能力的机制，WebSocket 的 RFC 文档并没有提供任何 Extensions。
+
+在 [IANA WebSocket Subprotocol Name Registry](https://www.iana.org/assignments/websocket/websocket.xml#subprotocol-name) 中提供了当前注册的 Extensions。
+
+**需要注意**
+
+- 如果要使用 Extensions，则该 Extensions 必须已经在 INAN 注册了。
 
 ## Security Considerations
 
