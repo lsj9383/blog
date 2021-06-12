@@ -19,6 +19,15 @@
         - [Data Frames](#data-frames)
     - [Sending and Receiving Data](#sending-and-receiving-data)
     - [Closing the Connection](#closing-the-connection)
+        - [Close Defines](#close-defines)
+            - [Close the WebSocket Connection](#close-the-websocket-connection)
+            - [Start the WebSocket Closing Handshake](#start-the-websocket-closing-handshake)
+            - [The WebSocket Closing Handshake is Started](#the-websocket-closing-handshake-is-started)
+            - [The WebSocket Connection is Closed](#the-websocket-connection-is-closed)
+            - [Fail the WebSocket Connection](#fail-the-websocket-connection)
+        - [Abnormal Closures](#abnormal-closures)
+        - [Normal Closure of Connections](#normal-closure-of-connections)
+        - [Status Codes](#status-codes)
     - [Error Handling in UTF-8-Encoded Data](#error-handling-in-utf-8-encoded-data)
     - [Extensions](#extensions)
         - [Negotiating Extensions](#negotiating-extensions)
@@ -593,6 +602,93 @@ opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
 1. Server 处理数据时，必须进行 Unmask 处理。
 
 ## Closing the Connection
+
+这里阐述了 WebSocket 连接关闭的定义和流程。
+
+### Close Defines
+
+WebSocket RFC 对连接关闭过程做了定义和解释。
+
+#### Close the WebSocket Connection
+
+这里为了关闭 WebSocket 连接，Endpoint 需要将关闭底层 TCP 连接。Endpoint 会简单的关闭 TCP 连接以及 TLS 会话。
+
+底层 TCP 连接在大多数情况下是由 Server 进行关闭的，但在异常情况下（例如在一个合理的时间量后没有接收到服务器的TCP Close），Client 也可以主动发起 TCP Close。
+
+#### Start the WebSocket Closing Handshake
+
+执行该过程，要求 Endpoint 使用 Status Code 和 Reason 发送 Close Frame。
+
+一旦 Endpoint 发送并接收到了 Close Frame，Endpoint 需要执行 [Close the WebSocket Connection](#close-the-websocket-connection)。
+
+#### The WebSocket Closing Handshake is Started
+
+Endpoint 在发送或者收到 Close Frame 时，意味着 WebSocket 进入了 CLOSING 状态。
+
+#### The WebSocket Connection is Closed
+
+当底层 TCP 连接关闭时，意味着 WebSocket 连接已经关闭了。
+
+如果在 WebSocket 关闭握手完成后 TCP 连接才关闭，则认为是 `cleanly` 关闭。
+
+如果无法建立 WebSocket 连接，也表示 WebSocket 关闭，但不是 `cleanly` 关闭。
+
+#### Fail the WebSocket Connection
+
+某些算法和规范需要 Endpoint 来执行 `Fail the WebSocket Connection`。
+
+为此，Client 必须执行 [Close the WebSocket Connection](#close-the-websocket-connection)，并且可以以适当的方式向用户报告问题（这对开发人员特别有用）。
+
+同样为此，Server 必须执行 [Close the WebSocket Connection](#close-the-websocket-connection)，并且应该记录问题。
+
+除了上述提及的，以及应用层主动关闭，Client 都不应该去主动关闭连接。
+
+### Abnormal Closures
+
+WebSocket 连接异常关闭。
+
+Client 主动关闭：
+
+- 某些 WebSocket 协议的判断，尤其是在连接握手时，如果存在异常，要求 Client 执行 [Fail the WebSocket Connection](#fail-the-websocket-connection)。
+- 任何使用底层 TCP 连接意外丢失，要求 Client 执行 [Fail the WebSocket Connection](#fail-the-websocket-connection)。
+- 应用层 API 主动关闭连接的调用。
+
+除了上面提到的原因外，Client 不应该主动关闭连接。
+
+Server 主动关闭：
+
+- 某些算法要求或推荐 Server 在连接握手期间中断 WebSocket 连接，要求 Server 执行 [Close the WebSocket Connection](#close-the-websocket-connection)。
+
+### Normal Closure of Connections
+
+Server 可以在任意时刻关闭 WebSocket 连接。Client 不应该随意关闭 WebSocket 连接。
+
+在任意情况中，Endpoint 主动关闭连接都需要执行 [Start the WebSocket Closing Handshake](#start-the-websocket-closing-handshake)。
+
+### Status Codes
+
+Close Frame 的状态码含义：
+
+Code | Description
+-|-
+0-999 | 这个范围内的状态码都没有被使用。
+1000 | 意味着正常的关闭，连接建立的目的已经达成，可以断开了。
+1001 | 意味着 Endpoint 离开，例如 Server 停止了，或者 Web 页面关闭了。
+1002 | 意味着 Endpoint 因为协议错误而终止连接。
+1003 | 意味着 Endpoint 收到的数据类型错误而终止连接。
+1004 | 保留，未使用。
+1005 | 1005 is a reserved value and MUST NOT be set as a status code in a Close control frame by an endpoint.<br>It is designated for use in applications expecting a status code to indicate that no status code was actually present.
+1006 | 1006 is a reserved value and MUST NOT be set as a status code in a Close control frame by an endpoint.<br>It is designated for use in applications expecting a status code to indicate that the connection was closed abnormally.
+1007 | 意味着终端因为收到了类型不连续的消息导致的连接关闭。
+1008 | 意味着 Endpoint 收到了违背策略消息而关闭连接。在没有更合适的状态码返回时，这是一个可以使用的通用状态码，若需要隐藏错误细节，也可以使用该状态码。
+1009 | 意味着 Endpoint 收到的消息过大而无法处理。
+1010 | 意味着 Client 期望与 Server 协商一个或多个 Extensions，但是 Server 没有返回 Extensions 进而导致连接关闭。
+1011 | 意味着 Server 遇到了一个意外的条件，阻止 Server 完成这个请求，从而导致连接关闭（例如依赖的关键 Server 挂掉了）。
+1015 | 1015 is a reserved value and MUST NOT be set as a status code in a Close control frame by an endpoint.<br>It is designated for use in applications expecting a status code to indicate that the connection was closed due to a failure to perform a TLS handshake.
+1000-2999 | Status codes in the range 1000-2999 are reserved for definition by this protocol, its future revisions, and extensions specified in a permanent and readily available public specification.
+3000-3999 | Status codes in the range 3000-3999 are reserved for use by libraries, frameworks, and applications.<br>These status codes are registered directly with IANA.  The interpretation of these codes is undefined by this protocol.
+4000-4999 | 保留下来私用的，因此这些状态码不能被注册。
+
 
 ## Error Handling in UTF-8-Encoded Data
 
