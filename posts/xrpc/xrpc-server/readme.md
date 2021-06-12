@@ -19,6 +19,8 @@
         - [HandleAnyMessage](#handleanymessage)
     - [Service](#service)
         - [ServiceImpl](#serviceimpl)
+            - [HandleTransportMessage](#handletransportmessage)
+            - [SendUnaryResponse](#sendunaryresponse)
         - [RpcServiceImpl](#rpcserviceimpl)
         - [ConcreteRpcService](#concreterpcservice)
         - [HttpService](#httpservice)

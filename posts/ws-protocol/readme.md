@@ -6,6 +6,9 @@
     - [Overview](#overview)
     - [WebSocket URIs](#websocket-uris)
     - [Opening Handshake](#opening-handshake)
+        - [Client Requirements](#client-requirements)
+        - [Server-Side Requirements](#server-side-requirements)
+        - [Multiple Versions](#multiple-versions)
     - [Data Framing](#data-framing)
         - [Base Framing Protocol](#base-framing-protocol)
         - [Fragmentation](#fragmentation)
@@ -14,6 +17,7 @@
             - [Ping Frame](#ping-frame)
             - [Pong Frame](#pong-frame)
         - [Data Frames](#data-frames)
+    - [Extensions](#extensions)
     - [Security Considerations](#security-considerations)
         - [Attacks On Infrastructure](#attacks-on-infrastructure)
     - [References](#references)
@@ -51,6 +55,19 @@
   Sec-WebSocket-Protocol: chat
   ```
 
+这里对一些头部进行解释：
+
+- 上述 `Sec-WebSocket-Key` 由 Server 使用，并计算得出 `Sec-WebSocket-Accept`，Client 需要用相同的方式校验 Accept 和 Key 是否匹配。
+  - Client 提供 `Sec-WebSocket-Key`，更方便 Server 校验 Client 是否真的支持 WebSocket，避免不小心和不支持 WebSocket 的 Client 建立了 WebSocket 连接。
+  - Server 提供 `Sec-WebSocket-Accept` 目的是确保 Server 真的理解并支持 WebSocket，避免 Client 和一个非 WebSocket Server 建立了 WebSocket 连接。
+  - 计算方式是公开的，这一操作并不保证任何安全性。
+- 上述 `Sec-WebSocket-Version` 指定了 WebSocket 使用的协议，通常为 13，细节请参考 [Multiple Versions](#multiple-versions)。
+- 上述 `Sec-WebSocket-Protocol` 指定了子协议，Client 通知 Server 期望使用的子协议，Server 根据自己的支持情况和优先级选择其中一个进行返回。
+  - 子协议可以自定义，也可以从 [IANA WebSocket Subprotocol Name Registry](https://www.iana.org/assignments/websocket/websocket.xml#subprotocol-name) 中选择。
+- WebSocket 还存在协议扩展头部 `Sec-WebSocket-Extensions`（上面没有给出），由 Client 提供，Server 根据自己的情况从中选择支持的返回（可以选择多个）。
+  - Extensions 可以自定义，也可以从 [IANA WebSocket Extension Name Registry](https://www.iana.org/assignments/websocket/websocket.xml#extension-name) 中选择。
+
+
 在握手成功以后，客户端和服务端传输的数据来回传输的数据单位，我们在规范中称为消息（Messages）。
 
 在传输中，一条消息有一个或者多个 Frame 组成。也因此，Frame 的负载数据串联起来就是消息的数据：
@@ -86,6 +103,185 @@ wss-URI = "wss:" "//" host [ ":" port ] path [ "?" query ]
 若使用 "#" 字符（不是表示 fragment），必须编码为 `%23`。
 
 ## Opening Handshake
+
+无论是客户端还是服务器，最初连接的状态是 `CONNECTING`，在握手完成后，状态变为 `OPEN`。
+
+连接大致流程如下：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant client as Client
+participant server as Server
+
+rect rgba(255, 255, 0, .1)
+  client ->> server: 建立 TCP 连接
+  server -->> client: 连接建立完成
+end
+
+rect rgba(0, 255, 255, .1)
+  client ->> server: 通过 TCP 发送握手请求（这是一个 HTTP 升级请求）
+  server -->> server: 检查握手请求
+  server -->> client: 返回握手响应
+end
+
+server -->> server: Server 端将连接状态设置为 OPEN
+
+client -->> client: 检查握手响应
+client -->> client: Client 端将连接状态设置为 OPEN
+```
+
+### Client Requirements
+
+从客户端视角来看，客户端需要通过 WebSocket URIs 提供 `host`, `port`, `resource name` 以及 `secure` 来进行连接 WebSocket 的建立。 
+
+Client 必须要先打开 TCP 连接，然后发送握手请求，再读取 Server 的握手响应。
+
+Client 建立 TCP 连接的要求：
+
+- Client 使用的 WebSocket URI 的每个组成部分（`host`, `port`, `resource name` 和 `secure`）均有效。
+- Client 和一个 IP 建立多个连接，必须是顺序的，即和同一个 IP 地址的连接最多只能有一个处于 CONNECTING 状态。多个域名解析出同一个 IP 仍然受次限制。
+  - Client 需要将处于 CONNECTING 状态的连接维持在一个较小的数量范围内。
+  - 这些限制是为了避免脚本建立大量的连接，进行 denial-of-service 攻击。
+  - Client 不会限制 OPEN 状态的连接个数，若需要限制则有 Server 进行限制（超出范围 Server 进行连接关闭）。
+- 如果 TCP 连接不能建立，WebSocket 连接必须立即终止，并停止任何尝试。
+- 如果使用 `wss`，Client 必须在 TCP 连接上进行 TLS 握手，如果 TLS 握手失败，则 WebSocket 连接必须立即终止。
+
+一旦 TCP 连接建立，Client 需要发送握手数据，握手请求是一个 HTTP 升级请求，它有这些要求：
+
+- 握手请求必须是一个有效的 HTTP 请求。
+- 握手请求必须使用 `GET` 方法，并且 HTTP 版本至少为 `1.1`。
+- 握手请求必须包含 `Host` HTTP Header，它包含了 `host:port` 的信息，是连接对端的信息。
+- 握手请求必须包含 `Upgrade` HTTP Header，取值必须为 `websocket`。
+- 握手请求必须包含 `Connection` HTTP Header，取值必须为 `Upgrade`。
+- 如果 Client 是一个浏览器，握手请求必须包含 `Origin` HTTP Header。非浏览器的 Client 也可能会包含这个 Header。该头部指示了 Client 运行的源。
+- 握手请求必须包含 `Sec-WebSocket-Key` HTTP Header，取值是随机 16 字节的数据的 Base64。每个连接都需要生成一个新的随机数。
+- 握手请求必须包含 `Sec-WebSocket-Version` HTTP Header，取值必须是 13。
+- 握手请求可能包含 `Sec-WebSocket-Protocol` HTTP Header，该值标识 Client 希望使用的子协议，可以是多个子协议，它们以逗号进行分割。
+- 握手请求可能包含 `Sec-WebSocket-Extensions` HTTP Header，该值标识 Client 希望进行的协议级别扩展，可以参考 [Extensions](#extensions)。
+- 握手请求可能包含其他的 HTTP Header，例如 Cookie，Authorization 等。
+
+握手请求发送后，Client 必须等待 Server 响应，当 Server 响应到来，Client 需要对响应进行校验：
+
+- 响应的状态码通常是 101，若不是 101，则需要根据具体值进行处理，例如：
+  - 401 需要 Client 提示用户提供身份
+  - 3xx 进行重定向。
+- 响应缺少 `Upgrade` HTTP Header，或者取值不为 `websocket`，Client 必须认为连接失败，并关闭连接。
+- 响应缺少 `Connection` HTTP Header，或者取值不为 `Upgrade`，Client 必须认为连接失败，并关闭连接。
+- 响应缺少 `Sec-WebSocket-Accept` HTTP Header，或者取值与请求中的 `Sec-WebSocket-Key` 计算不匹配，Client 必须认为连接失败，并关闭连接。
+- 如果响应包含 `Sec-WebSocket-Extensions` 且使用了在请求中 `Sec-WebSocket-Extensions` 不包含的扩展，Client 必须认为连接失败，并关闭连接。
+- 如果响应包含 `Sec-WebSocket-Protocol` 且使用了在请求中 `Sec-WebSocket-Protocol` 不包含的子协议，Client 必须认为连接失败，并关闭连接。
+
+如果服务端的响应通过了上述的验证过程，那么 WebSocket 就已经建立连接了，并且 WebSocket 的连接状态也到了 OPEN 状态。
+
+### Server-Side Requirements
+
+从 Server 视角来看，Server 需要等待 Client 的 TCP 连接，并等待 Client 的握手请求，再对此进行响应。
+
+当与 Client 建立 TCP 连接后，Server 认为 WebSocket 处于 CONNECTING 状态。
+
+Server 解析 Client 的握手请求：
+
+- 必须是一个版本大于 HTTP/1.1 的 GET 请求。
+- 包含了 Host Header，其指出了 authority。
+- 包含了 Upgrade Header，取值必须为 websocket。
+- 包含了 Connection Header，取值必须为 Upgrade。
+- 包含了 Sec-WebSocket-Key Header，这是一个 Base64 编码的值，解码后有 16 个字节。
+- 包含了 Sec-WebSocket-Version Header，取值必须为 13。
+- 可选的 Origin Header。缺少该字段时，会认为连接来自非浏览器的 Client。
+- 可选的 Sec-WebSocket-Protocol Header，列出了 Client 希望使用的子协议，以优先级排序。
+- 可选的 Sec-WebSocket-Extensions Header，列出了 Client 希望使用的扩展。
+- 未知的 Header 选择忽略。
+
+如果 Server 解析 Client 握手请求失败，Server 必须立即终止握手流程，并返回 HTTP 错误码（Server 并不会去关闭这个 TCP 连接，以便 Client 重新握手）。
+
+Version 这是可以协商的，参考 [Multiple Versions](#multiple-versions)。
+
+Server 解析 Client 握手请求成功后，可以发送响应了：
+
+- 连接如果使用 TLS，则需要进行 TLS 握手，如果 TLS 握手失败，需要关闭连接（Server 看起来只有这种情况才会主动关闭 TCP 连接）。
+- Server 可以对 Client 进行认证，不同认证返回 401。
+- Server 可以使用 3xx 进行重定向。
+- Server 构造以下信息：
+  - `/origin/`
+    - Client 的 `Origin Header` 提供，标识 Client 运行的源。
+    - Server 可以使用这个信息来作为判断是否接受这个连接的参考。如果服务端没有过滤 Origin，那么他会接受任意 Origin 的连接。
+  - `/key/`
+    - Client 的 `Sec-WebSocket-Key` Header 提供，
+    - Server 使用该值构造 Sec-WebSocket-Accept。
+  - `/version/`
+    - Client 的 `Sec-WebSocket-Version` Header 提供，标识 Client 建立 WebSocket 连接使用的协议版本。
+    - Server 需要判断自己是否支持该版本，若不支持需要返回 `426 Upgrade Required`，同时返回 `Sec-WebSocket-Version` 标识自己支持的版本。
+  - `/resource name/`
+    - 标识 Server 提供的 Service。如果 Server 提供多个服务，则 Client 通过 resource name 来声明自己需要什么服务。
+    - 如果 Client 请求的服务无效，Server 必须返回相应错误码。
+  - `/subprotocol/`
+    - 表示服务器使用的子协议，为 null 或者某一个单一值，选择的值来自于 Client 的 `Sec-WebSocket-Protocol`。
+    - 如果 Server 不接受 Client 的 Protocol，或者 Client 没有传递 Protocol，则 Server 必须认为 subprotocol 为 null。
+  - `/extensions/`
+    - 表示 Server 准备使用的 Extensions 列表，选择的值来自于 Client 的 `Sec-WebSocket-Extensions`。
+    - Client 未提供的值不得使用。
+- Server 接收连接，则需要通过一个有效的 HTTP 响应返回以下信息：
+  - 101 状态码，例如 `HTTP/1.1 101 Switching Protocols`。
+  - Upgrade Header，取值为 `websocket`。
+  - Connection Header，取值为 `Upgrade`。
+  - Sec-WebSocket-Accept Header，取值为 b64(sha1(`/key/` + 258EAFA5-E914-47DA-95CA-C5AB0DC85B11))。
+  - 可选的 Sec-WebSocket-Protocol Header，取值为 `/subprotocol/`。
+  - 可选的 Sec-WebSocket-Extensions Header，取值为 `/extensions/`，可以返回多个。
+
+如果 Server 完成这些步骤都没有问题，Server 会认为 WebSocket 连接已建立，并设置为 OPEN 状态。这个时刻开始，Server 可以发送和接收数据了。
+
+### Multiple Versions
+
+虽然通常使用 WebSocket 版本 13，但是这不是必须的，Client 和 Server 是可以进行版本协商的。
+
+WebSocket 协议版本号和 RFC Draft 编号有所关系，但并不是一一对应，WebSocket 版本请参考 [WebSocket Version Number Registry](https://www.iana.org/assignments/websocket/websocket.xml#version-number)。
+
+Client 可以通过 `Sec-WebSocket-Version` 告诉 Server 自己愿意使用的 WebSocket 版本（不一定必须使用版本 13）：
+
+- 如果 Server 支持该版本，则服务器接收请求，完成连接建立。
+- 如果 Server 不支持该版本，Server 返回 `Sec-WebSocket-Version` Header 来指示自己所支持的版本。
+  - 如果 Client 支持其中之一，则 Client 应该选择其一重新发起握手请求（相同的 TCP 连接上）。
+
+Client 发送自己期望使用的版本 25：
+
+```text
+GET /chat HTTP/1.1
+Host: server.example.com
+Upgrade: websocket
+Connection: Upgrade
+...
+Sec-WebSocket-Version: 25
+```
+
+Server 不支持版本 25，并返回了自己支持的所有版本：
+
+```text
+HTTP/1.1 400 Bad Request
+...
+Sec-WebSocket-Version: 13, 8, 7
+
+或者以多个 Version Header 返回
+
+HTTP/1.1 400 Bad Request
+...
+Sec-WebSocket-Version: 13
+Sec-WebSocket-Version: 8, 7
+```
+
+Client 选择一个合适的版本，重新发起一个握手请求：
+
+```text
+GET /chat HTTP/1.1
+Host: server.example.com
+Upgrade: websocket
+Connection: Upgrade
+...
+Sec-WebSocket-Version: 13
+```
+
+
 
 ## Data Framing
 
@@ -364,6 +560,8 @@ opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
 - Text，Payload Data 是一个文本字符串，并由 UTF-8 进行编码。由于分片的原因，一个 Frame 中可能只包含部分有效的 UTF-8（在分片边缘被截断），但是分片重组数据后，整体应该是有效的 UTF-8 数据。
 - Binary，Payload Data 是任意二进制数据，由应用层去处理和解释。
 
+## Extensions
+
 ## Security Considerations
 
 这里介绍了适用于 WebSocket 协议的安全注意事项。
@@ -374,3 +572,4 @@ opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
 
 1. [The WebSocket Protocol](https://www.rfc-editor.org/rfc/rfc6455.html)
 1. [WebSocket 协议 RFC 文档（全中文翻译）](https://juejin.cn/post/6844903779192569869)
+1. [Protocol upgrade mechanism](https://developer.mozilla.org/en-US/docs/Web/HTTP/Protocol_upgrade_mechanism)
