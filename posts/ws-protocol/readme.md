@@ -17,6 +17,9 @@
             - [Ping Frame](#ping-frame)
             - [Pong Frame](#pong-frame)
         - [Data Frames](#data-frames)
+    - [Sending and Receiving Data](#sending-and-receiving-data)
+    - [Closing the Connection](#closing-the-connection)
+    - [Error Handling in UTF-8-Encoded Data](#error-handling-in-utf-8-encoded-data)
     - [Extensions](#extensions)
     - [Security Considerations](#security-considerations)
         - [Attacks On Infrastructure](#attacks-on-infrastructure)
@@ -559,6 +562,36 @@ opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
 
 - Text，Payload Data 是一个文本字符串，并由 UTF-8 进行编码。由于分片的原因，一个 Frame 中可能只包含部分有效的 UTF-8（在分片边缘被截断），但是分片重组数据后，整体应该是有效的 UTF-8 数据。
 - Binary，Payload Data 是任意二进制数据，由应用层去处理和解释。
+
+## Sending and Receiving Data
+
+为了发送一个 WebSocket Message，Endpoint 需要进行以下操作：
+
+1. Endpoint 需要确保 WebSocket 连接处于 OPEN 状态。
+1. Endpoint 必须将数据封装为 Frame。如果发送的数据太大（或 Endpoint 开始发送数据时，数据并不完整），Endpoint 需要将其封装为多个 Frame。
+1. 第一个 Frame 的 opcode 必须要指明是 text 还是 binary，以便接收方能够正确处理。
+1. 最后一个 Frame 的 fin 必须为 1。
+1. Client 发送数据必须 Mask。
+1. 如果定义了 Extensions，则 Extensions 所涉及到的相关问题，也需要在这里进行考虑和操作。
+1. 格式化的 Frame 必须通过底层网络连接（通常是 TCP）进行传输。
+
+为了接受 WebSocket 数据，Endpoint 必须监听底层网络连接。
+
+1. 输入的数据一定要进行 WebSocket Frame 解析。
+1. 如果收到 Control Frame，需要参考 [Control Frames](#control-frames) 进行处理。
+1. 如果收到 Data Frame，需要根据 opcode 进行处理（主要是针对 text 判断串联后的数据是否为有效的 UTF-8）。
+1. 如果收到的是未分片的消息，则收到 Data Frame 就认为收到了整个消息。
+1. 如果收到的是分片的消息，则需要将 Application data 进行串联。当收到 FIN 帧时，认为一个 Message 已经被完整收到了，接下来会是一个新的 Message。
+1. Extensions 可能改变数据如何理解的方式。
+1. Server 处理数据时，必须进行 Unmask 处理。
+
+## Closing the Connection
+
+## Error Handling in UTF-8-Encoded Data
+
+当 Endpoint 使用 UTF-8 解析字节流时，发现这不是一个 UTF-8 或者不是一个有效的 UTF-8，Endpoint 必须关闭 WebSocket 连接。
+
+这一规则在开始握手时，或者后续的数据交换中均生效。
 
 ## Extensions
 
