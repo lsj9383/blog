@@ -24,7 +24,13 @@
         - [Negotiating Extensions](#negotiating-extensions)
         - [Known Extensions](#known-extensions)
     - [Security Considerations](#security-considerations)
+        - [Non-Browser Clients](#non-browser-clients)
+        - [Origin Considerations](#origin-considerations)
         - [Attacks On Infrastructure](#attacks-on-infrastructure)
+        - [WebSocket Client Authentication](#websocket-client-authentication)
+        - [Connection Confidentiality and Integrity](#connection-confidentiality-and-integrity)
+        - [Handling of Invalid Data](#handling-of-invalid-data)
+        - [Use of SHA-1 by the WebSocket Handshake](#use-of-sha-1-by-the-websocket-handshake)
     - [References](#references)
 
 <!-- /TOC -->
@@ -285,7 +291,6 @@ Connection: Upgrade
 ...
 Sec-WebSocket-Version: 13
 ```
-
 
 
 ## Data Framing
@@ -562,7 +567,7 @@ opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
 
 数据帧中可以携带应用数据和扩展数据，而 opcode 决定了如何去理解这些数据：
 
-- Text，Payload Data 是一个文本字符串，并由 UTF-8 进行编码。由于分片的原因，一个 Frame 中可能只包含部分有效的 UTF-8（在分片边缘被截断），但是分片重组数据后，整体应该是有效的 UTF-8 数据。
+- Text，Payload Data 是一个文本字符串（包含了 Extensions Data），并由 UTF-8 进行编码。由于分片的原因，一个 Frame 中可能只包含部分有效的 UTF-8（在分片边缘被截断），但是分片重组数据后，整体应该是有效的 UTF-8 数据。
 - Binary，Payload Data 是任意二进制数据，由应用层去处理和解释。
 
 ## Sending and Receiving Data
@@ -679,10 +684,88 @@ Extensions 提供了为 WebSocket 协议附加其他能力的机制，WebSocket 
 
 这里介绍了适用于 WebSocket 协议的安全注意事项。
 
+### Non-Browser Clients
+
+WebSocket 协议对于运行在可信任的应用（例如浏览器）中时，可以通过 Origin 头部来防止来自于其他 Origin 的恶意 Javascript 请求。
+
+虽然 WebSocket 目的是为 Web 页面中使用，但是也可以直接被其他主机使用，这种情况下 Origin 是可以被伪造的，因此 Server 不能因为 Origin 正确就完全相信请求方。
+
+准确的说，Server 不能相信任何输入是有效的。
+
+### Origin Considerations
+
+WebSocket Server 应该通过白名单机制以限制请求的 Origin，并针对不在白名单中的 Origin 在 HTTP 握手时就返回 403 Forbidden 状态码。
+
+当不信任的 Javascript 运行在受信任的 Client （例如浏览器）中时，该保护是有效的。
+
+这个方法的目的并不能阻止非浏览器的 Client 建立连接，而是确保受信任的浏览器下潜在的恶意 Javascript 请求连接受到限制。
+
 ### Attacks On Infrastructure
+
+除了 WebSocket 的 Endpoint 会成为攻击的目标外，Web 基础设置（例如 Proxy）也可能成为攻击目标。
+
+**攻击方式**
+
+这种攻击的通用形式是 Attacker Client 和 Attacker Server 建立连接，并在此基础上发送类似于 WebSocket 握手的 HTTP Upgrade 请求，紧接着再这个 Upgraded 连接上发送 HTTP 请求数据（可以是对常用静态资源的 HTTP GET 请求）。
+
+上述对于 Attacker Client 和 Attacker Server 而言已经是 WebSocket 连接了，但是很多 Proxy 并不理解，以为是 HTTP 连接，因此若用 WebSocket 发送请求和响应可能会被 Proxy 缓存。
+
+Attacker Server 可能会返回一个自己定义的任意响应，并且这个响应会被缓存到部分中间代理，导致缓存毒化。更进一步，如果 Attacker 引诱其他认访问 Attacker Server，会导致缓存污染到更多的中间代理。
+
+最终导致经过了中间代理的请求，会拿到 Attacker Server 构造的响应。
+
+**问题解决**
+
+上述攻击的前提条件是 Attacker 窃取用户 Client 使用 WebSocket 请求静态资源的数据，并且 Attacker 伪造这样的请求和响应，让 Attacker Server 对这个静态资源的响应缓存到 Proxy 上，进而导致用户 Client 使用 WebSocket 请求静态资源时拿到 Proxy 上被污染的缓存。
+
+但如果用户 Client 通过 Mask 机制，可以保障对同一个资源发送完全不一样的 WebSocket Frame，让 Proxy 认为这样的请求没有被缓存过，因此不去使用被污染的缓存。
+
+Attacker 即便窃取了用户 Client 被 Mask 的请求，也无法知道用户 Client 下次 Mask 的数据，因此 Attacker 无法去更新 Proxy 的缓存。
+
+该手段核心是解决 Proxy 缓存污染，也正因如此，只需要 Client 进行 Mask 即可，Server 是不用 Mask 的。
+
+**缓存污染**
+
+这个安全考虑的核心问题是 Proxy 的缓存污染，可以参考 [What is the mask in a WebSocket frame?](https://stackoverflow.com/questions/14174184/what-is-the-mask-in-a-websocket-frame)。
+
+HTTP 也存在类似的缓存污染问题，参考下图可以较好的说明 Proxy 缓存污染问题：
+
+![MnpMn](assets/MnpMn.png)
+
+至于为什么 wss 中同样需要使用 Mask，或许是为了保持实现的统一性。对于这一问题，参考了来自 StackOverflow 中网友的猜想：
+
+> I'm not sure about this one, but I suspect that it is meant to allow the parser to be connection agnostic and easier to write. In clear text, unmasked frames are a protocol error and result in a disconnection initiated by the server. Having the parser behave the same, regardless of the connection, allows us to separate the parser from the raw IO layer, making it connection agnostic and offering support for event based programming.
+
+### WebSocket Client Authentication
+
+WebSocket 协议并未规定 Server 在 WebSocket 握手期间对 Client 进行身份认证的方式。
+
+WebSocket 可以使用通用 HTTP Server 采取的任何 Client 认证机制，例如 cookies，HTTP Authentication 或者 TLS 认证。
+
+### Connection Confidentiality and Integrity
+
+连接的机密性和一致性通过 TLS Layer 进行保障，即 `wss` scheme。
+
+### Handling of Invalid Data
+
+Client 和 Server 都应该校验输入数据是否有效。
+
+当 Endpoint 面对无法理解的值，或者值违背了安全规范和标准，甚至在握手阶段 Endpoint 没有接收到一个有效的预期数据，Endpoint `可能`会关闭 TCP 连接。
+
+- 如果无效的数据在 WebSocket 连接建立后出现，那么 Endpoint 应该发送 Close Frame 并带上一个合适的错误码。
+- 如果无效数据在 WebSocket 握手中出现，Server 应该返回一个合适的 HTTP 状态码。
+
+一个常见且通用的问题是使用错误的编码来发送 text 数据，即没有使用 UTF-8 来编码 text 的数据。
+
+### Use of SHA-1 by the WebSocket Handshake
+
+WebSocket 握手期间使用的 SHA-1 （构造 Key Accept）并不会依赖于 SHA-1 的任何安全属性，只是单纯的确认 Server 是否为一个有效的 WebSocket Server 而已。
 
 ## References
 
 1. [The WebSocket Protocol](https://www.rfc-editor.org/rfc/rfc6455.html)
 1. [WebSocket 协议 RFC 文档（全中文翻译）](https://juejin.cn/post/6844903779192569869)
 1. [Protocol upgrade mechanism](https://developer.mozilla.org/en-US/docs/Web/HTTP/Protocol_upgrade_mechanism)
+1. [What is the mask in a WebSocket frame?](https://stackoverflow.com/questions/14174184/what-is-the-mask-in-a-websocket-frame)
+1. [Talking to Yourself for Fun and Profit](http://www.adambarth.com/papers/2011/huang-chen-barth-rescorla-jackson.pdf)
+1. [How does websocket frame masking protect against cache poisoning?](https://security.stackexchange.com/questions/36930/how-does-websocket-frame-masking-protect-against-cache-poisoning)
