@@ -22,34 +22,54 @@
 
 ## Overview
 
-Client 握手请求：
+本文主要是对 [The WebSocket Protocol](https://datatracker.ietf.org/doc/html/rfc6455) 的总结和梳理。
 
-```http
-GET /chat HTTP/1.1
-Host: server.example.com
-Upgrade: websocket
-Connection: Upgrade
-Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
-Origin: http://example.com
-Sec-WebSocket-Protocol: chat, superchat
-Sec-WebSocket-Version: 13
+本文对 WebSocket 的背景，解决的问题不做阐述，本文主要是聚焦在 WebSocket 协议细节，流程，安全性方面的内容。
+
+先看一下 WebSocket 握手流程：
+
+- Client 握手请求：
+
+  ```http
+  GET /chat HTTP/1.1
+  Host: server.example.com
+  Upgrade: websocket
+  Connection: Upgrade
+  Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+  Origin: http://example.com
+  Sec-WebSocket-Protocol: chat, superchat
+  Sec-WebSocket-Version: 13
+  ```
+
+- Server 握手响应：
+
+  ```http
+  HTTP/1.1 101 Switching Protocols
+  Upgrade: websocket
+  Connection: Upgrade
+  Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+  Sec-WebSocket-Protocol: chat
+  ```
+
+在握手成功以后，客户端和服务端传输的数据来回传输的数据单位，我们在规范中称为消息（Messages）。
+
+在传输中，一条消息有一个或者多个 Frame 组成。也因此，Frame 的负载数据串联起来就是消息的数据：
+
+```text
++--------------------------------------------------------------------+
+|                           Single Message                           |
++--------------------------------------------------------------------+
+|       Frame 1        |       Frame 2        |       Frame 3        |
++----------------------+----------------------+----------------------+
+|  fin = 0, opcode = 2 |  fin = 0, opcode = 0 |  fin = 1, opcode = 0 |
++----------------------+----------------------+----------------------+
 ```
 
-Server 握手响应：
-
-```http
-HTTP/1.1 101 Switching Protocols
-Upgrade: websocket
-Connection: Upgrade
-Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
-Sec-WebSocket-Protocol: chat
-```
-
-在握手成功以后，客户端和服务端传输的数据来回传输的数据单位，我们在规范中称为消息（messages）。
-
-在传输中，一条消息有一个或者多个帧组成。
+有关 Frame 的内容参考 [Data Framing](#data-framing)。
 
 ## WebSocket URIs
+
+WebSocket 定义了两种 URI 方法 ws 和 wss，完整的 URI 由 ABNF 语法表示：
 
 ```text
 ws-URI = "ws:" "//" host [ ":" port ] path [ "?" query ]
@@ -332,7 +352,21 @@ Pong 帧的目的由两个：
 
 ### Data Frames
 
+数据帧有两种，均通过 opcode 进行声明：
+
+- 0x1 Text
+- 0x2 Binary
+
+opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
+
+数据帧中可以携带应用数据和扩展数据，而 opcode 决定了如何去理解这些数据：
+
+- Text，Payload Data 是一个文本字符串，并由 UTF-8 进行编码。由于分片的原因，一个 Frame 中可能只包含部分有效的 UTF-8（在分片边缘被截断），但是分片重组数据后，整体应该是有效的 UTF-8 数据。
+- Binary，Payload Data 是任意二进制数据，由应用层去处理和解释。
+
 ## Security Considerations
+
+这里介绍了适用于 WebSocket 协议的安全注意事项。
 
 ### Attacks On Infrastructure
 
