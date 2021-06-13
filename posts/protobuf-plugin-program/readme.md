@@ -8,8 +8,7 @@
     - [Quick Start](#quick-start)
     - [Compile Protobuf Plugin C++](#compile-protobuf-plugin-c)
     - [How To Use Plugin](#how-to-use-plugin)
-    - [Bazel Tool](#bazel-tool)
-    - [Appendix: Plugin API](#appendix-plugin-api)
+    - [Protobuf Plugin API](#protobuf-plugin-api)
         - [CodeGeneratorRequest](#codegeneratorrequest)
         - [CodeGeneratorResponse](#codegeneratorresponse)
     - [Appendix: References](#appendix-references)
@@ -112,7 +111,7 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
 
   ```
 
-- 最后，我们可以在 protoc 运行时指定插件进程（Python 插件脚本名叫 `protoc-gen-custom`，文件名没有 `.py` 后缀）：
+- 最后，我们可以在 protoc 运行时指定插件进程（这里 Python 插件脚本名叫 `protoc-gen-custom`，文件名没有 `.py` 后缀）：
 
   ```sh
   protoc --plugin=protoc-gen-custom=./protoc-gen-custom --custom_out=. hello.proto 
@@ -147,35 +146,7 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
 
 ## Compile Protobuf Plugin C++
 
-编译 Protobuf C++ 插件是比较麻烦的，因此：
-
-- 尽量使用 Python 脚本方式实现插件，请参考 [Quick Start](#quick-start)。
-- 使用 Bazel 编译插件，请参考 [Bazel Compile Plugin](#bazel-compile-plugin)。
-
-作为学习，我们这里阐述如何用最原始的 g++ 方式编译 Protobuf 插件。
-
-## How To Use Plugin
-
-将 Plugin 的进程文件准备好后，需要在 protoc 编译时进行使用，有两种方式指定插件：
-
-- 通过 `--plugin` 参数，指定插件二进制文件路径：
-
-  ```sh
-  # 以下 NAME 是插件的名称
-  protoc --plugin=protoc-gen-NAME=path/to/mybinary --NAME_out=OUT_DIR
-  # e.g. NAME = xrpc, PATH = /data/workspace/xrpc-plugin/xrpc_cpp_plugin
-  protoc --plugin=protoc-gen-xrpc=/data/workspace/xrpc-plugin/xrpc_cpp_plugin --xrpc_out=OUT_DIR
-  ```
-
-- 将 Plugin 的二进制文件放置到环境变脸 PATH 的任意路径下，并且将二进制文件命名为 `protoc-gen-NAME` (NAME 是插件名称)，这样就不用通过 `--plugin` 参数指定使用的插件：
-
-  ```sh
-  protoc --NAME_out=OUT_DIR
-  # e.g. NAME = xrpc
-  protoc --xrpc_out=OUT_DIR
-  ```
-
-## Bazel Tool
+编译 Protobuf C++ 插件是比较麻烦的，这里建议使用 Bazel 进行 Protobuf C++ 插件的编译。如果嫌编译麻烦，可以用 Python 脚本提供 Protobuf 插件。
 
 Bazel 是 Google 提供的编译工具，很多工程中我们都会使用 Bazel 进行编译。这不是一个 Bazel 的教程，对于 Bazel 的更多信息请访问 [Bazel](https://bazel.build/)。
 
@@ -287,9 +258,30 @@ $ protoc --plugin=protoc-gen-demo=bazel-bin/protoc-gen-demo --demo_out=. hello.p
 
 具体代码可以参考 [bazel-compile-plugin](bazel-compile-plugin/readme.md)。
 
-## Appendix: Plugin API
+## How To Use Plugin
 
-这里列出 [protobuf plugin.pb.h](https://developers.google.com/protocol-buffers/docs/reference/cpp/google.protobuf.compiler.plugin.pb?hl=ja) 中提供的文件内容，插件所用的 API 就是这些 protobuf 所提供的。
+将 Plugin 的进程文件准备好后，需要在 protoc 编译时进行使用，有两种方式指定插件：
+
+- 通过 `--plugin` 参数，指定插件二进制文件路径：
+
+  ```sh
+  # 以下 NAME 是插件的名称
+  protoc --plugin=protoc-gen-NAME=path/to/mybinary --NAME_out=OUT_DIR
+  # e.g. NAME = xrpc, PATH = /data/workspace/xrpc-plugin/xrpc_cpp_plugin
+  protoc --plugin=protoc-gen-xrpc=/data/workspace/xrpc-plugin/xrpc_cpp_plugin --xrpc_out=OUT_DIR
+  ```
+
+- 将 Plugin 的二进制文件放置到环境变脸 PATH 的任意路径下，并且将二进制文件命名为 `protoc-gen-NAME` (NAME 是插件名称)，这样就不用通过 `--plugin` 参数指定使用的插件：
+
+  ```sh
+  protoc --NAME_out=OUT_DIR
+  # e.g. NAME = xrpc
+  protoc --xrpc_out=OUT_DIR
+  ```
+
+## Protobuf Plugin API
+
+这里列出 [protobuf plugin.pb.h](https://developers.google.com/protocol-buffers/docs/reference/cpp/google.protobuf.compiler.plugin.pb?hl=ja) 中提供的部分内容，插件所用的 API 就是这些 protobuf 所提供的。
 
 ### CodeGeneratorRequest
 
