@@ -13,18 +13,10 @@
         - [Base Framing Protocol](#base-framing-protocol)
         - [Fragmentation](#fragmentation)
         - [Control Frames](#control-frames)
-            - [Close Frame](#close-frame)
-            - [Ping Frame](#ping-frame)
-            - [Pong Frame](#pong-frame)
         - [Data Frames](#data-frames)
     - [Sending and Receiving Data](#sending-and-receiving-data)
     - [Closing the Connection](#closing-the-connection)
         - [Close Defines](#close-defines)
-            - [Close the WebSocket Connection](#close-the-websocket-connection)
-            - [Start the WebSocket Closing Handshake](#start-the-websocket-closing-handshake)
-            - [The WebSocket Closing Handshake is Started](#the-websocket-closing-handshake-is-started)
-            - [The WebSocket Connection is Closed](#the-websocket-connection-is-closed)
-            - [Fail the WebSocket Connection](#fail-the-websocket-connection)
         - [Abnormal Closures](#abnormal-closures)
         - [Normal Closure of Connections](#normal-closure-of-connections)
         - [Status Codes](#status-codes)
@@ -87,6 +79,7 @@
 - WebSocket 还存在协议扩展头部 `Sec-WebSocket-Extensions`（上面没有给出），由 Client 提供，Server 根据自己的情况从中选择支持的返回（可以选择多个）。
   - Extensions 必须从 [IANA WebSocket Extension Name Registry](https://www.iana.org/assignments/websocket/websocket.xml#extension-name) 中选择（不能自定义）。
 
+更多的关于 WebSocket 握手的信息请参考 [Opening Handshake](#opening-handshake)。
 
 在握手成功以后，客户端和服务端传输的数据来回传输的数据单位，我们在规范中称为消息（Messages）。
 
@@ -97,12 +90,12 @@
 |                           Single Message                           |
 +--------------------------------------------------------------------+
 |       Frame 1        |       Frame 2        |       Frame 3        |
-+----------------------+----------------------+----------------------+
-|  fin = 0, opcode = 2 |  fin = 0, opcode = 0 |  fin = 1, opcode = 0 |
-+----------------------+----------------------+----------------------+
++--------------------------------------------------------------------+
 ```
 
 有关 Frame 的内容参考 [Data Framing](#data-framing)。
+
+在 WebSocket 连接需要关闭时，需要使用 Closing Handshake，即关闭握手。WebSocket 任何一个 Endpoint 都可以发送 Close Frame，发起关闭握手，对端收到后需要发送一个相应的 Close Frame。更多关于 WebSocket 连接关闭的信息请参考 [Closing the Connection](#closing-the-connection)。
 
 ## WebSocket URIs
 
