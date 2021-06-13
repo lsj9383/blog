@@ -596,7 +596,55 @@ opcode 的 0x3 - 0x7 是为扩展数据帧类型而保留的范围。
 
 ## Closing the Connection
 
-这里阐述了 WebSocket 连接关闭的定义和流程。
+WebSocket 建立在 TCP 基础上，其关闭是 TCP 连接关闭的补充，TCP 连接关闭是点对点的，WebSocket 连接关闭是端对端的。
+
+如果是 Client 主动关闭 WebSocket 连接：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant client as Client
+participant server as Server
+
+rect rgba(255, 255, 0, .1)
+  client ->> server: 建立 WebSocket 连接
+  server -->> client: 连接建立完成
+end
+
+rect rgba(0, 255, 255, .1)
+  client ->> server: Close Frame(status_code)
+  server -->> client: Close Frame(status_code)
+end
+
+client -->> client: 等待 Server 关闭 TCP 连接
+server -->> server: 关闭 TCP 连接
+client -->> client: 关闭 TCP 连接
+```
+
+如果是 SERVER 主动关闭 WebSocket 连接：
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant client as Client
+participant server as Server
+
+rect rgba(255, 255, 0, .1)
+  client ->> server: 建立 WebSocket 连接
+  server -->> client: 连接建立完成
+end
+
+rect rgba(0, 255, 255, .1)
+  server ->> client: Close Frame(status_code)
+  client -->> server: Close Frame(status_code)
+end
+
+client -->> client: 等待 Server 关闭 TCP 连接
+server -->> server: 关闭 TCP 连接
+client -->> client: 关闭 TCP 连接
+```
 
 ### Close Defines
 
@@ -604,35 +652,48 @@ WebSocket RFC 对连接关闭过程做了定义和解释。
 
 #### Close the WebSocket Connection
 
-这里为了关闭 WebSocket 连接，Endpoint 需要将关闭底层 TCP 连接。Endpoint 会简单的关闭 TCP 连接以及 TLS 会话。
+执行 `Close the WebSocket Connection`，Endpoint 需要将底层 TCP 连接关闭。Endpoint 会简单的关闭 TCP 连接以及 TLS 会话。
 
-底层 TCP 连接在大多数情况下是由 Server 进行关闭的，但在异常情况下（例如在一个合理的时间量后没有接收到服务器的TCP Close），Client 也可以主动发起 TCP Close。
+WebSocket 场景中，底层 TCP 连接的关闭是有要求的：
+
+- 正常情况下是由 Server 进行 TCP 连接的关闭。
+- 异常情况下（例如在一个合理的时间量后没有接收到服务器的 TCP Close），Client 也可以主动关闭 TCP 连接。
+
+因此，对于正常情况：
+
+- Server 执行 `Close the WebSocket Connection` 需要立即关闭 TCP 连接。
+- Client 执行 `Close the WebSocket Connection` 应该等待 Server 关闭 TCP 连接。
+
+用 Berkeley socket 示范 Endpoint 关闭 TCP 连接的操作：
+
+```cpp
+void ServerShutdownAndClose() {
+  shutdown();
+  // 等待对面准备好关闭连接
+  while (recv() != 0) {}
+  close(); 
+}
+
+void ClientWaitAndClose() {
+  // 等待对面准备好关闭连接
+  while (recv() != 0) {}
+  close(); 
+}
+```
 
 #### Start the WebSocket Closing Handshake
 
-执行该过程，要求 Endpoint 使用 Status Code 和 Reason 发送 Close Frame。
+对于已建立的 WebSocket 连接，Endpoint 需要使用 Close Frame 发起关闭握手，并传递状态码和错误原因。
 
-一旦 Endpoint 发送并接收到了 Close Frame，Endpoint 需要执行 [Close the WebSocket Connection](#close-the-websocket-connection)。
-
-#### The WebSocket Closing Handshake is Started
-
-Endpoint 在发送或者收到 Close Frame 时，意味着 WebSocket 进入了 CLOSING 状态。
-
-#### The WebSocket Connection is Closed
-
-当底层 TCP 连接关闭时，意味着 WebSocket 连接已经关闭了。
-
-如果在 WebSocket 关闭握手完成后 TCP 连接才关闭，则认为是 `cleanly` 关闭。
-
-如果无法建立 WebSocket 连接，也表示 WebSocket 关闭，但不是 `cleanly` 关闭。
+Endpoint 发送并接收到了 Close Frame，Endpoint 需要执行 [Close the WebSocket Connection](#close-the-websocket-connection)。
 
 #### Fail the WebSocket Connection
 
 某些算法和规范需要 Endpoint 来执行 `Fail the WebSocket Connection`。
 
-为此，Client 必须执行 [Close the WebSocket Connection](#close-the-websocket-connection)，并且可以以适当的方式向用户报告问题（这对开发人员特别有用）。
+任何执行该过程的 Endpoint 都必须执行 [Close the WebSocket Connection](#close-the-websocket-connection)，并且可以以适当的方式向用户报告问题（这对开发人员特别有用）。
 
-同样为此，Server 必须执行 [Close the WebSocket Connection](#close-the-websocket-connection)，并且应该记录问题。
+如果在执行 `Fail the WebSocket Connection` 前，WebSocket 连接已经建立，Endpoint 应该发送一个 Close Frame。如果 Endpoint 认为对端无法接受 Close Frame，Endpoint 可以忽略 Close Frame 的发送。
 
 除了上述提及的，以及应用层主动关闭，Client 都不应该去主动关闭连接。
 
@@ -656,7 +717,7 @@ Server 主动关闭：
 
 Server 可以在任意时刻关闭 WebSocket 连接。Client 不应该随意关闭 WebSocket 连接。
 
-在任意情况中，Endpoint 主动关闭连接都需要执行 [Start the WebSocket Closing Handshake](#start-the-websocket-closing-handshake)。
+任何一个 Endpoint 主动关闭连接都需要遵循 [Start the WebSocket Closing Handshake](#start-the-websocket-closing-handshake)。
 
 ### Status Codes
 
@@ -858,3 +919,4 @@ WebSocket 握手期间使用的 SHA-1 （构造 Key Accept）并不会依赖于 
 1. [What is the mask in a WebSocket frame?](https://stackoverflow.com/questions/14174184/what-is-the-mask-in-a-websocket-frame)
 1. [Talking to Yourself for Fun and Profit](http://www.adambarth.com/papers/2011/huang-chen-barth-rescorla-jackson.pdf)
 1. [How does websocket frame masking protect against cache poisoning?](https://security.stackexchange.com/questions/36930/how-does-websocket-frame-masking-protect-against-cache-poisoning)
+1. [How Do Websockets Work?](https://sookocheff.com/post/networking/how-do-websockets-work/)
