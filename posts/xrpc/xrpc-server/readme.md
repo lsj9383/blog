@@ -7,8 +7,9 @@
     - [Quick Start](#quick-start)
     - [UML Class Diagram](#uml-class-diagram)
     - [Sequence Diagram](#sequence-diagram)
-        - [Server Start](#server-start)
-        - [ServiceAdapter Receive Data](#serviceadapter-receive-data)
+        - [Server Start Diagram](#server-start-diagram)
+        - [Process Request Diagram](#process-request-diagram)
+        - [Async Response Diagram](#async-response-diagram)
     - [XrpcServer](#xrpcserver)
         - [XrpcServer Initial](#xrpcserver-initial)
         - [RegistryService](#registryservice)
@@ -31,7 +32,101 @@
 
 ## Overview
 
+Xrpc Server 进一步封装了监听连接，处理连接的接口，一个 Xrpc Server 可以由一个或多个 Service 组成。
+
+Xrpc Server 已经提供了多种类型的 Service 的实现（例如 http service, rpc service），也可以在此基础上扩展其他类型的 Service。
+
+开发人员决定使用什么 Service 后，就可以在此基础上实现各个 Service 的逻辑处理函数，并决定 Service 收到请求后如何去分发这些请求到对应的逻辑处理函数。
+
 ## Quick Start
+
+通过我们实现一个自定义的 Echo Service 来快速理解 Xrpc Server 的工作机制。
+
+其中最重要的是构建 ServiceAdapter，以及处理请求和响应的 Service。
+
+其次，我们需要一个 ServerCodec 去处理沾包分包问题，Codec 并非本节的重点，并且 Echo 的 Codec 非常简单，这里会提供一个简单的实现。
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
+
+#include "xrpc/server/service.h"
+#include "xrpc/server/service_adapter.h"
+#include "xrpc/common/config/xrpc_config.h"
+#include "xrpc/common/future/future_utility.h"
+#include "xrpc/common/xrpc_plugin.h"
+
+class EchoServerCodec : public xrpc::ServerCodec {
+ public:
+  EchoServerCodec() = default;
+  ~EchoServerCodec() override = default;
+  std::string Name() const override { return "echo"; }
+
+  // 校验 Packet 完整性，处理沾包分包
+  int ZeroCopyCheck(const xrpc::ConnectionPtr& conn,
+                    xrpc::NoncontiguousBuffer& in,
+                    std::deque<std::any>& out) override {
+    std::cout << "========== Check ==========" << std::endl;
+    out.push_back(in);
+    in.Clear();
+    return xrpc::PacketChecker::PACKET_FULL;
+  }
+};
+
+class EchoService : public xrpc::Service {
+ public:
+  EchoService() {}
+  ~EchoService() {}
+
+  // 将数据原封不动返回
+  void HandleTransportMessage(xrpc::STransportReqMsg *recv,
+                              xrpc::STransportRspMsg **send) override {
+    std::cout << "========== HandleTransportMessage ==========" << std::endl;
+    *send = new xrpc::STransportRspMsg();
+    (*send)->basic_info = recv->basic_info;
+    (*send)->send_data = std::any_cast<xrpc::NoncontiguousBuffer&>(recv->msg);
+  }
+};
+
+void Start() {
+  // Register Codec
+  xrpc::ServerCodecPtr codec(new EchoServerCodec());
+  xrpc::XrpcPlugin::GetInstance()->RegisterServerCodec(codec);
+
+  // Service
+  xrpc::ServicePtr echo_service(new EchoService());
+
+  // ServiceAdapter Options
+  xrpc::ServiceAdapterOption option;
+  option.socket_type = "net";
+  option.network = "tcp";
+  option.ip = "0.0.0.0";
+  option.is_ipv6 = false;
+  option.port = 8899;
+  option.protocol = "echo";
+  option.max_packet_size = 10000000;
+  option.recv_buffer_size = 8192;
+  option.merge_send_data_size = 8192;
+
+  xrpc::ServiceAdapter adapter(option);
+  adapter.SetService(echo_service);
+  adapter.Listen();
+
+  // sleep
+  auto promise = xrpc::Promise<bool>();
+  auto fut = promise.get_future();
+  fut.Wait();
+}
+
+int main() {
+  xrpc::XrpcConfig::GetInstance()->Init("test_server.yaml");
+  xrpc::XrpcPlugin::GetInstance()->InitThreadModel();
+  Start();
+  xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
+}
+```
 
 ## UML Class Diagram
 
@@ -156,7 +251,9 @@ class ServerContext {
 
 ## Sequence Diagram
 
-### Server Start
+下面显示几种场景的时序图。
+
+### Server Start Diagram
 
 ```mermaid
 sequenceDiagram
@@ -209,7 +306,9 @@ rect rgba(0, 255, 255, .1)
 end
 ```
 
-### ServiceAdapter Receive Data
+### Process Request Diagram
+
+这里的时序图展示了 Reactor 感知到请求，并交给 ServiceAdapter 进行处理的过程：
 
 ```mermaid
 sequenceDiagram
@@ -242,6 +341,15 @@ rect rgba(0, 255, 255, .2)
   end
 end
 ```
+
+### Async Response Diagram
+
+在上述流程中展现了接收到了数据如何处理，并如何进行同步响应，那对于异步响应在 xrpc 中是如何处理的呢？
+
+1. 在对请求处理时，需要设置 `context->SetResponse(false)`
+1. 需要响应数据时，使用 `ServerContext::SendUnaryResponse()` 方法。
+
+这一部分很简单，不用额外再用时序图来表示了，可以参考 [Async Response](#async-response) 部分。
 
 ## XrpcServer
 
@@ -891,7 +999,7 @@ void UnaryServiceHandler::HandleMessage(STransportReqMsg* recv, STransportRspMsg
   }
   ```
 
-- SendUnaryResponse(status), 对于 RPC Service 只会返回一个 status 信息，对于 HTTP Service 会影响 HTTP Headers：
+- SendUnaryResponse(status), 对于 RPC Service 只会返回一个 status 信息，对于 HTTP Service 这个 status 没有任何意义：
 
   ```cpp
   void ServerContext::SendUnaryResponse(const xrpc::Status& status) {
