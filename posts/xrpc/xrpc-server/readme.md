@@ -19,8 +19,6 @@
         - [HandleAnyMessage](#handleanymessage)
     - [Service](#service)
         - [ServiceImpl](#serviceimpl)
-            - [HandleTransportMessage](#handletransportmessage)
-            - [SendUnaryResponse](#sendunaryresponse)
         - [RpcServiceImpl](#rpcserviceimpl)
         - [ConcreteRpcService](#concreterpcservice)
         - [HttpService](#httpservice)
@@ -128,7 +126,9 @@ class HttpService {
 }
 ```
 
-ServerContext 是一个独立的类，这里进行单独呈现：
+ServerContext 是一个独立的类，是 Server 接收到请求后为其创建的上下文，每个请求都会有一个独立的 ServerContext，并在 Server 响应完毕后销毁。
+
+这里为 ServerContext 进行单独呈现：
 
 ```mermaid
 classDiagram
@@ -757,6 +757,8 @@ void HandleMessage(STransportReqMsg* recv, STransportRspMsg** send) {
     }
   }
 ```
+
+上述对于同步调用的回包 `service_impl_->SendUnaryResponse(context, context->GetResponseMsg(), sned)` 并不会立即发送数据，而是在 ServiceAdapter 的 HandleAnyMessage 中进行实际的响应发送。对于这一点，请参考 [SendUnaryResponse](#sendunaryresponse)。
 
 ## RpcMethodHandler
 
