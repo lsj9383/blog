@@ -17,6 +17,7 @@
     - [ServiceProxyImpl](#serviceproxyimpl)
         - [RpcServiceProxy](#rpcserviceproxy)
         - [Concrete RpcServiceProxy](#concrete-rpcserviceproxy)
+        - [HttpServiceProxy](#httpserviceproxy)
     - [ClientContext](#clientcontext)
 
 <!-- /TOC -->
@@ -492,12 +493,40 @@ Future<ProtocolPtr> ServiceProxy::AsyncUnaryTransportInvoke(const ClientContextP
 
 RpcServiceProxy 继承了 ServicProxy，提供了模版方法以更方便的方式去使用。
 
+#### RpcServiceProxy SetEncode
+
+```cpp
+bool SetEncode(const ClientContextPtr& context) {
+  serialization::DataType type;
+  EncodeType encode_type;
+  if constexpr (std::is_convertible_v<RequestMessage*, google::protobuf::Message*>) {
+    type = serialization::kPbMessage;
+    encode_type = EncodeType::PB;
+  } else if constexpr (std::is_convertible_v<RequestMessage*, flatbuffers::xrpc::MessageFbs*>) {
+    type = serialization::kFlatBuffers;
+    encode_type = EncodeType::FLATBUFFER;
+  } else if constexpr (std::is_convertible_v<RequestMessage*, rapidjson::Document*>) {
+    type = serialization::kRapidJson;
+    encode_type = EncodeType::JSON;
+  } else if constexpr (std::is_convertible_v<RequestMessage*, std::string*>) {
+    type = serialization::kStringNoop;
+    encode_type = EncodeType::NOOP;
+  } else {
+    return false;
+  }
+
+  context->SetEncodeDataType(type);
+  context->SetEncodeType(static_cast<uint16_t>(encode_type));
+  return true;
+}
+```
+
 #### RpcServiceProxy UnaryInvoke
 
 RpcServiceProxy 提供模版方法 UnaryInvoke 去封装了父类 ServiceProxy 的 UnaryInvoke 的调用，两个目的：
 
-- 方便传入任意类型的 Protobuf Message。
-- 设置编码方式。
+- 方便传入任意类型的对象。
+- 设置编码方式，RpcServiceProxy 并没有要求请求的消息格式一定为 Protobuf Message。
 
 除此外，该方法也提供了埋点处理，Client Context 构造的能力：
 
@@ -725,6 +754,10 @@ public:
 ```
 
 通过上述代码可以很明显看出，Concrete RpcServiceProxy 目的是为了简化应用层调用。
+
+### HttpServiceProxy
+
+HttpServiceProxy 继承于 RpcServiceProxy，
 
 ## ClientContext
 
