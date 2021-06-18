@@ -11,9 +11,12 @@
     - [ServiceProxy](#serviceproxy)
         - [SetServiceProxyOptionInner](#setserviceproxyoptioninner)
         - [SetEndpointInfo](#setendpointinfo)
-        - [Concrete ServiceProxy](#concrete-serviceproxy)
-        - [RPC ServiceProxy](#rpc-serviceproxy)
-    - [Sequence Diagram](#sequence-diagram)
+        - [ProxyOptionToTransInfo](#proxyoptiontotransinfo)
+        - [UnaryInvoke](#unaryinvoke)
+        - [AsyncUnaryInvoke](#asyncunaryinvoke)
+    - [ServiceProxyImpl](#serviceproxyimpl)
+        - [RpcServiceProxy](#rpcserviceproxy)
+        - [Concrete RpcServiceProxy](#concrete-rpcserviceproxy)
     - [ClientContext](#clientcontext)
 
 <!-- /TOC -->
@@ -30,8 +33,8 @@ classDiagram
 XrpcClient --> ServiceProxyManager
 ServiceProxyManager --> ServiceProxy
 ServiceProxy <|-- RpcServiceProxy
-ServiceProxy <|-- HttpServiceProxy
 ServiceProxy <|-- RedisServiceProxy
+RpcServiceProxy <|-- HttpServiceProxy
 RpcServiceProxy <|-- ConcreteRpcServiceProxy
 
 class XrpcClient {
@@ -59,7 +62,9 @@ class ServiceProxy {
 }
 
 class RpcServiceProxy {
-  +UnaryInvoke(context, req, rsp) Status
+  +(Template)UnaryInvoke(context, req, rsp) Status
+  +(Template)AsyncUnaryInvoke(context, req) Future
+  +(Template)OnewayInvoke(context, req) Status
 }
 
 class ConcreteRpcServiceProxy {
@@ -157,7 +162,9 @@ int ServiceProxyManager::Destory() {
 
 ServiceProxy 是应用请求 Server 的类，它为应用层暴露相应的方法去请求 Server。
 
-ServiceProxy 是一个抽象类，对于请求不同的 Server 会有不同的 ServiceProxy 实现。
+对于请求不同的 Server 会有不同的 ServiceProxy 实现。
+
+不过需要注意的是 ServiceProxy 的方法已经是完备了，子类一般不会去重写 ServiceProxy 的方法。
 
 ### SetServiceProxyOptionInner
 
@@ -169,7 +176,7 @@ void ServiceProxy::SetServiceProxyOptionInner(const std::shared_ptr<ServiceProxy
 
   // 缓存 ServiceProxy 使用的 codec
   SetCodecNameInner(option->codec_name);
-  // 缓存 client_transport
+  // 初始化并设置 future_transport
   SetFutureTransportNameInner(option_->future_transport_name);
   // 对 backup retires 的配置
   PrepareStatistics(option->name);
@@ -201,7 +208,19 @@ void ServiceProxy::InitServiceNameInfo() {
     service_name_ = option_->target;
   }
 }
+
+void ServiceProxy::SetFutureTransportNameInner(const std::string& transport_name) {
+  FutureTransport::Options option;
+  ThreadModel* thread_model = ThreadModelManager::GetInstance()->GetThreadModel(
+                                option_->threadmodel_type,
+                                option_->threadmodel_instance_name);
+  option.trans_info = ProxyOptionToTransInfo();
+  option.thread_model = thread_model;
+  future_transport_->Init(option);
+}
 ```
+
+其中 ProxyOptionToTransInfo 方法是比较重要的，它包含了 transport 的相关配置，对网络事件的回调处理，其中便包含了如何解析接收到的数据，如何分发响应处理 Task 等，请参考 [ProxyOptionToTransInfo](#proxyoptiontotransinfo) 。
 
 ### SetEndpointInfo
 
@@ -233,15 +252,418 @@ void ConvertEndpointInfo(const std::string& ip_ports, std::vector<XrpcEndpointIn
 }
 ```
 
-### Concrete ServiceProxy
+### ProxyOptionToTransInfo
 
-下面会列举常见的 ServiceProxy 实现。
+该方法是用于初始化 future_transport 配置项，future_transport 是 ServiceProxy 实际负责网络处理的对象。
 
-#### RpcServiceProxy
+```cpp
+TransInfo ServiceProxy::ProxyOptionToTransInfo() {
+  TransInfo trans_info;
 
-RpcServiceProxy 是继承 ServicProxy 的抽象类。
+  // 配置 trans_info
+  trans_info.conn_type = GetClientConnectType();
+  trans_info.connection_idle_timeout = option_->idle_time;
+  trans_info.max_conn_num = option_->max_conn_num;
+  trans_info.max_packet_size = option_->max_packet_size;
+  trans_info.merge_send_data_size = option_->merge_send_data_size;
+  trans_info.recv_buffer_size = option_->recv_buffer_size;
+  trans_info.is_complex_conn = option_->is_conn_complex;
 
-#### Concrete RpcServiceProxy
+  // 设置回调函数
+  trans_info.conn_close_function = option_->proxy_callback.conn_close_function;
+  trans_info.conn_establish_function = option_->proxy_callback.conn_establish_function;
+  trans_info.msg_writedone_function = option_->proxy_callback.msg_writedone_function;
+  trans_info.req_dispatch_function = option_->proxy_callback.req_dispatch_function;
+  trans_info.rsp_dispatch_function = option_->proxy_callback.rsp_dispatch_function;
+  trans_info.checker_function = option_->proxy_callback.checker_function;
+  trans_info.rsp_decode_function = option_->proxy_callback.rsp_decode_funtion;
+
+  auto thread_model = ThreadModelManager::GetInstance()->GetThreadModel(
+                        option_->threadmodel_type,
+                        option_->threadmodel_instance_name);
+
+  // 默认回函数
+  auto defualt_checker_function = [this](const ConnectionPtr& conn, NoncontiguousBuffer& in,
+                                         std::deque<std::any>& out) -> int {
+    return codec_->ZeroCopyCheck(conn, in, out);
+  };
+
+
+  auto defualt_rsp_decode_function = [this](std::any&& in, ProtocolPtr& out) -> bool {
+    out = std::move(codec_->CreateResponsePtr());
+    return codec_->ZeroCopyDecode(nullptr, std::move(in), out) ? true : false;
+  };
+
+  auto default_rsp_dispatch_function = [this, thread_model](Task* task) {
+      auto* req_msg = static_cast<STransportReqMsg*>(task->task);
+      auto client_extend_info = req_msg->extend_info->client_extend_info;
+
+      // 请求发起线程为用户线程, 直接执行应答处理过程
+      if (!client_extend_info.dispatch_info ||
+          client_extend_info.dispatch_info->src_thread_id < 0) {
+        task->handler(task);
+      }
+
+      int dst_thread_model_id = thread_model->GetThreadModelId();
+      task->group_id = dst_thread_model_id;
+      task->dst_thread_key = client_extend_info.dispatch_info->dst_thread_key;
+      if (dst_thread_model_id == client_extend_info.dispatch_info->src_thread_model_id) {
+        // 请求发起和处理的 threadmodel 相同，考虑回到发起请求的线程处理执行回调
+        task->dst_thread_key = client_extend_info.dispatch_info->dst_thread_key < 0
+                                    ? client_extend_info.dispatch_info->src_thread_id
+                                    : client_extend_info.dispatch_info->dst_thread_key;
+      }
+
+      TaskResult result = thread_model->SubmitHandleTask(task);
+
+      // 队列满时无法消费 task, 直接设置异常，用户设置的 dst_thread_key 不再生效
+      if (result.ret == TaskRetCode::QUEUE_FULL) {
+        auto& client_promise = client_extend_info.promise;
+        Promise<STransportRspMsg>* promise = static_cast<Promise<STransportRspMsg>*>(client_promise);
+        promise->SetException(CommonException("handle task queue is full, maybe overload",
+                                              TaskRetCode::QUEUE_FULL));
+      }
+    };
+
+  // 必需的回调函数不能为空
+  if (!trans_info.checker_function) {
+    trans_info.checker_function = defualt_checker_function;
+  }
+
+  if (!trans_info.rsp_decode_function) {
+    trans_info.rsp_decode_function = defualt_rsp_decode_function;
+  }
+
+  if (!trans_info.rsp_dispatch_function) {
+    trans_info.rsp_dispatch_function = default_rsp_dispatch_function;
+  }
+
+  trans_info.codec_name = codec_->Name();
+  return trans_info;
+}
+```
+
+### UnaryInvoke
+
+ServiceProxy 最重要的就是发送数据了，其中 UnaryInvoke 是发送数据后同步等待响应，该方法包括：
+
+- 超时检查
+- 调用 transport 进行真正的数据通信
+- AOP 埋点处理
+
+```cpp
+Status ServiceProxy::UnaryInvoke(const ClientContextPtr& context, const ProtocolPtr& req,
+                                 ProtocolPtr& rsp) {
+  // 超时检查
+  if (CheckTimeout(context)) {
+    return context->GetStatus();
+  }
+
+  // Transport 发送消息前埋点 返回 0 则不进行 Transport 发送
+  if (RunFilters(FilterPoint::CLIENT_PRE_SEND_MSG, context) == 0) {
+    UnaryTransportInvoke(context, req, rsp);
+  }
+
+  // transport接收消息后埋点
+  RunFilters(FilterPoint::CLIENT_POST_RECV_MSG, context);
+  return context->GetStatus();
+}
+
+void ServiceProxy::UnaryTransportInvoke(const ClientContextPtr& context, const ProtocolPtr& req,
+                                        ProtocolPtr& rsp) {
+  // 编码
+  NoncontiguousBuffer req_msg_buf;
+  codec_->ZeroCopyEncode(context, req, req_msg_buf);
+
+
+  // 构造请求消息
+  STransportReqMsg req_msg;
+  req_msg.send_data = std::move(req_msg_buf);
+  req_msg.basic_info = context->GetBasicInfo();
+  req_msg.basic_info->begin_timestamp = xrpc::TimeProvider::GetNowMs();
+  req_msg.extend_info.client_extend_info.retry_info = context->GetRetryInfo();
+
+
+  STransportRspMsg rsp_msg;
+  int ret = future_transport_->SendRecv(&req_msg, &rsp_msg);
+  if (ret != 0) {
+    std::string error("service name:");
+    error += GetServiceName();
+    error += ", transport name:";
+    error += future_transport_->Name();
+    error += ", sendrcv failed, ret:";
+    error += std::to_string(ret);
+
+    Status result;
+    result.SetFrameworkRetCode(ret);
+    result.SetErrorMessage(error);
+    context->SetStatus(std::move(result));
+    return;
+  }
+
+  rsp = std::any_cast<ProtocolPtr&&>(std::move(rsp_msg.msg));
+}
+```
+
+可见，在发送数据的时候并没有选择对应的目标节点，该节点是设置在 context 的 BasicInfo 中的，通过 `req_msg.basic_info = context->GetBasicInfo()` 间接指定请求的目标节点。
+
+### AsyncUnaryInvoke
+
+这个是异步网络请求，通过 Promise Future 机制在获得响应时触发回调。
+
+该方法和 UnaryInvoke 的行为基本类似，主要是超时检查，埋点等处理，只是异步化而已：
+
+```cpp
+Future<ProtocolPtr> ServiceProxy::AsyncUnaryInvoke(const ClientContextPtr& context,
+                                                   const ProtocolPtr& req) {
+  // 全链路超时检查，如果超时时间为 0 的话直接返回失败
+  if (CheckTimeout(context)) {
+    const Status& result = context->GetStatus();
+    return MakeExceptionFuture<ProtocolPtr>(
+        CommonException(result.ErrorMessage().c_str(), result.GetFrameworkRetCode()));
+  }
+
+  // transport 发送消息前埋点
+  if (RunFilters(FilterPoint::CLIENT_PRE_SEND_MSG, context) == 0) {
+    return AsyncUnaryTransportInvoke(context, req).Then([this, context](Future<ProtocolPtr>&& rsp) {
+      // transport 发送消息后埋点
+      RunFilters(FilterPoint::CLIENT_POST_RECV_MSG, context);
+      return std::move(rsp);
+    });
+  }
+
+
+  RunFilters(FilterPoint::CLIENT_POST_RECV_MSG, context);
+  // 输出拦截器异常
+  return MakeExceptionFuture<ProtocolPtr>(
+      CommonException(context->GetStatus().ErrorMessage().c_str()));
+}
+
+// 目前异步调用方式固定为使用future transport,哪怕设置了spp或者fiber都无效
+Future<ProtocolPtr> ServiceProxy::AsyncUnaryTransportInvoke(const ClientContextPtr& context,
+                                                            const ProtocolPtr& req_protocol) {
+  // 编码
+  NoncontiguousBuffer req_msg_buf;
+  codec_->ZeroCopyEncode(context, req_protocol, req_msg_buf);
+
+  // 构造请求包
+  STransportReqMsg* req_msg = new STransportReqMsg;
+  req_msg->send_data = std::move(req_msg_buf);
+  req_msg->basic_info = context->GetBasicInfo();
+  req_msg->basic_info->begin_timestamp = xrpc::TimeProvider::GetNowMs();
+  req_msg->extend_info.client_extend_info.retry_info = context->GetRetryInfo();
+
+  return future_transport_->AsyncSendRecv(req_msg).Then(
+      [context, req_msg, this](Future<STransportRspMsg>&& fut) mutable {
+        if (!fut.is_ready()) {
+          // 失败
+          Exception ex = fut.GetException();
+          std::string error("service name:");
+          error += GetServiceName();
+          error += ", transport name:";
+          error += future_transport_->Name();
+          error += ", ex:";
+          error += ex.what();
+
+          Status result;
+          result.SetFrameworkRetCode(ex.GetExceptionCode());
+          result.SetErrorMessage(error);
+          context->SetStatus(std::move(result));
+          return MakeExceptionFuture<ProtocolPtr>(ex);
+        }
+
+        // 成功
+        auto rsp_msg = std::move(std::get<0>(fut.GetValue()));
+        ProtocolPtr rsp = std::any_cast<ProtocolPtr&&>(std::move(rsp_msg.msg));
+        return MakeReadyFuture<ProtocolPtr>(std::move(rsp));
+      });
+}
+```
+
+## ServiceProxyImpl
+
+下面会列举常见的 ServiceProxy 实现，主要包括：
+
+- 用于 XRPC 的 RpcServiceProxy
+- 用于 Redis 的 RedisServiceProxy
+- 用于 HTTP 的 HttpServiceProxy
+
+### RpcServiceProxy
+
+RpcServiceProxy 继承了 ServicProxy，提供了模版方法以更方便的方式去使用。
+
+#### RpcServiceProxy UnaryInvoke
+
+RpcServiceProxy 提供模版方法 UnaryInvoke 去封装了父类 ServiceProxy 的 UnaryInvoke 的调用，两个目的：
+
+- 方便传入任意类型的 Protobuf Message。
+- 设置编码方式。
+
+除此外，该方法也提供了埋点处理，Client Context 构造的能力：
+
+```cpp
+template <class RequestMessage, class ResponseMessage>
+Status RpcServiceProxy::UnaryInvoke(const ClientContextPtr& context, const RequestMessage& req,
+                                    ResponseMessage* rsp) {
+  // 编码设置
+  SetEncode<RequestMessage>(context)
+
+  // 设置上下文context
+  FillClientContext(context);
+
+  // 设置未序列化的请求数据
+  context->SetRequestData(const_cast<RequestMessage*>(&req));
+
+  // RPC 调用前埋点
+  if (RunFilters(FilterPoint::CLIENT_PRE_RPC_INVOKE, context) == 0) {
+    UnaryInvokeImp<RequestMessage, ResponseMessage>(context, req, rsp);
+    if (context->GetStatus().OK()) {
+      // 设置反序列化后的响应数据
+      context->SetResponseData(rsp);
+    }
+  }
+
+  // RPC调用后埋点
+  RunFilters(FilterPoint::CLIENT_POST_RPC_INVOKE, context);
+
+  context->SetRequestData(nullptr);
+  context->SetResponseData(nullptr);
+  return context->GetStatus();
+}
+
+template <class RequestMessage, class ResponseMessage>
+void RpcServiceProxy::UnaryInvokeImp(const ClientContextPtr& context, const RequestMessage& req,
+                                     ResponseMessage* rsp) {
+  const ProtocolPtr& req_protocol = context->GetRequest();
+
+  if (!codec_->FillRequest(context, req_protocol,
+                           reinterpret_cast<void*>(const_cast<RequestMessage*>(&req)))) {
+    std::string error("service name:");
+    error += GetServiceName();
+    error += ", request fill body failed.";
+
+    Status status;
+    status.SetFrameworkRetCode(XrpcRetCode::XRPC_CLIENT_ENCODE_ERR);
+    status.SetErrorMessage(error);
+
+    context->SetStatus(std::move(status));
+    return;
+  }
+
+  ProtocolPtr& rsp_protocol = context->GetResponse();
+
+  // ServiceProxy 的 UnaryInvoke 调用，进行网络请求并等待响应
+  Status unary_invoke_status = ServiceProxy::UnaryInvoke(context, req_protocol, rsp_protocol);
+
+  if (!codec_->FillResponse(context, rsp_protocol, reinterpret_cast<void*>(rsp))) {
+    std::string error("service name:");
+    error += GetServiceName();
+    error += ", response fill body failed.";
+
+    if (context->GetStatus().OK()) {
+      Status status;
+      status.SetFrameworkRetCode(XrpcRetCode::XRPC_CLIENT_DECODE_ERR);
+      status.SetErrorMessage(error);
+      context->SetStatus(std::move(status));
+    }
+    return;
+  }
+}
+```
+
+#### RpcServiceProxy AsyncUnaryInvoke
+
+类似 [RpcServiceProxy UnaryInvoke](#rpcserviceproxy-unaryinvoke)，但是 AsyncUnaryInvoke 为异步接口：
+
+```cpp
+template <class RequestMessage, class ResponseMessage>
+Future<ResponseMessage> RpcServiceProxy::AsyncUnaryInvoke(const ClientContextPtr& context,
+                                                          const RequestMessage& req) {
+  SetEncode<RequestMessage>(context);
+
+  // 设置上下文context
+  FillClientContext(context);
+
+  // 设置未序列化的请求数据
+  context->SetRequestData(const_cast<RequestMessage*>(&req));
+
+  // RPC调用前埋点
+  if (RunFilters(FilterPoint::CLIENT_PRE_RPC_INVOKE, context) == 0) {
+    context->SetRequestData(nullptr);
+    return AsyncUnaryInvokeImp<RequestMessage, ResponseMessage>(context, req)
+        .Then([this, context](Future<ResponseMessage>&& rsp) {
+          // 设置反序列化后的响应数据
+          if (rsp.is_ready()) {
+            const ResponseMessage& rsp_msg = std::get<0>(rsp.GetConstValue());
+            context->SetResponseData(const_cast<ResponseMessage*>(&rsp_msg));
+          }
+
+          // RPC调用结束埋点
+          RunFilters(FilterPoint::CLIENT_POST_RPC_INVOKE, context);
+          context->SetResponseData(nullptr);
+          return std::move(rsp);
+        });
+  }
+
+  RunFilters(FilterPoint::CLIENT_POST_RPC_INVOKE, context);
+
+  const Status& result = context->GetStatus();
+  context->SetRequestData(nullptr);
+  return MakeExceptionFuture<ResponseMessage>(CommonException(result.ErrorMessage().c_str()));
+}
+
+template <class RequestMessage, class ResponseMessage>
+Future<ResponseMessage> RpcServiceProxy::AsyncUnaryInvokeImp(const ClientContextPtr& context,
+                                                             const RequestMessage& req) {
+  ProtocolPtr& req_protocol = context->GetRequest();
+
+  if (!codec_->FillRequest(context, req_protocol,
+                           reinterpret_cast<void*>(const_cast<RequestMessage*>(&req)))) {
+    std::string error("service name:");
+    error += GetServiceName();
+    error += ", request fill body failed.";
+
+    Status status;
+    status.SetFrameworkRetCode(XrpcRetCode::XRPC_CLIENT_ENCODE_ERR);
+    status.SetErrorMessage(error);
+
+    context->SetStatus(std::move(status));
+
+    return MakeExceptionFuture<ResponseMessage>(CommonException(
+        context->GetStatus().ErrorMessage().c_str(), XrpcRetCode::XRPC_CLIENT_ENCODE_ERR));
+  }
+
+  return ServiceProxy::AsyncUnaryInvoke(context, req_protocol)
+      .Then([this, context](Future<ProtocolPtr>&& rsp_protocol) {
+        if (rsp_protocol.is_failed()) {
+          return MakeExceptionFuture<ResponseMessage>(rsp_protocol.GetException());
+        }
+
+        context->SetResponse(std::move(std::get<0>(rsp_protocol.GetValue())));
+
+        ResponseMessage rsp_obj;
+        void* raw_rsp = static_cast<void*>(&rsp_obj);
+
+        if (!codec_->FillResponse(context, context->GetResponse(), raw_rsp)) {
+          std::string error("service name:");
+          error += GetServiceName();
+          error += ", response fill body failed.";
+
+          if (context->GetStatus().OK()) {
+            Status status;
+            status.SetFrameworkRetCode(XrpcRetCode::XRPC_CLIENT_DECODE_ERR);
+            status.SetErrorMessage(error);
+            context->SetStatus(std::move(status));
+          }
+          return MakeExceptionFuture<ResponseMessage>(
+              CommonException(context->GetStatus().ErrorMessage().c_str()));
+        }
+        return MakeReadyFuture<ResponseMessage>(std::move(rsp_obj));
+      });
+}
+```
+
+### Concrete RpcServiceProxy
 
 虽然 RpcServiceProxy 封装了 RPC 网络调用，但是它没有将其通过桩的形式为应用层提供接口。
 
@@ -303,10 +725,6 @@ public:
 ```
 
 通过上述代码可以很明显看出，Concrete RpcServiceProxy 目的是为了简化应用层调用。
-
-### RPC ServiceProxy
-
-## Sequence Diagram
 
 ## ClientContext
 
