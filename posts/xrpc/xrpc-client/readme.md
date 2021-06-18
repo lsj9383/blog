@@ -18,6 +18,7 @@
         - [RpcServiceProxy](#rpcserviceproxy)
         - [Concrete RpcServiceProxy](#concrete-rpcserviceproxy)
         - [HttpServiceProxy](#httpserviceproxy)
+        - [RedisServiceProxy](#redisserviceproxy)
     - [ClientContext](#clientcontext)
 
 <!-- /TOC -->
@@ -73,13 +74,18 @@ class ConcreteRpcServiceProxy {
 }
 
 class HttpServiceProxy {
-  +UnaryInvoke(context, req, rsp) Status
+  +Get(context, url, json) Status
+  +GetString(context, url, rsp) Status
+  +Post(context, url, data, rsp) Status
 }
 
 class RedisServiceProxy {
-  +UnaryInvoke(context, req, rsp) Status
+  +Command(context, reply, cmd) Status
+  +AsyncCommand(context, cmd) Future
 }
 ```
+
+Client Context 是一个很重要的类，每次发起请求都应该新建一个 Client Context，该类包含了很多请求相关信息。
 
 ## Xrpc Client
 
@@ -757,7 +763,13 @@ public:
 
 ### HttpServiceProxy
 
-HttpServiceProxy 继承于 RpcServiceProxy，
+HttpServiceProxy 继承于 RpcServiceProxy，用于使用 HTTP 协议请求和获取响应。
+
+但是 HttpServiceProxy 由于设计的原因，缺陷较多，目前团队在改造，因此不做过多介绍。
+
+### RedisServiceProxy
+
+RedisServiceProxy 继承于 ServiceProxy，用于请求 Redis 并获取响应。
 
 ## ClientContext
 
