@@ -326,6 +326,8 @@ class DefaultConnection {
 
 ## Sequence Diagram
 
+根据不同的场景，提供了以下时许。
+
 ### Submit Send Task
 
 应用程序发送数据时，会向 IO Task 提交一个数据发送任务，并返回一个 Future。
