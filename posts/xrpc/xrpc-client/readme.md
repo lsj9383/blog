@@ -41,6 +41,103 @@ Xrpc Client 封装了请求 Server 的接口，这些 Server 包括 XRPC Server�
 
 为了更快速的理解 Xrpc Client 和 ServiceProxy 的使用和工作方式，这里继承 ServiceProxy 实现一个超简单的发起 HTTP 请求的 ServiceProxy。
 
+为了对数据进行序列化和反序列化，以及处理沾包分包，这里提供了一个简易的 SimpleHttpClientCodec。
+
+```cpp
+#include <iostream>
+#include <string>
+
+#include "xrpc/client/xrpc_client.h"
+#include "xrpc/client/make_client_context.h"
+#include "xrpc/common/xrpc_plugin.h"
+#include "xrpc/codec/xrpc/xrpc_protocol.h"
+#include "xrpc/codec/client_codec_factory.h"
+
+class SimpleHttpClientCodec : public xrpc::ClientCodec {
+ public:
+  SimpleHttpClientCodec() = default;
+  ~SimpleHttpClientCodec() override = default;
+  std::string Name() const override { return "simple_http"; }
+  xrpc::ProtocolPtr CreateRequestPtr() override {
+    std::cout << "========== " << __FUNCTION__ << std::endl;
+    return std::make_shared<xrpc::XrpcRequestProtocol>();
+  }
+
+  xrpc::ProtocolPtr CreateResponsePtr() override {
+    std::cout << "========== " << __FUNCTION__ << std::endl;
+    return std::make_shared<xrpc::XrpcResponseProtocol>();
+  }
+
+  int ZeroCopyCheck(const xrpc::ConnectionPtr& conn, xrpc::NoncontiguousBuffer& in,
+                    std::deque<std::any>& out) override {
+    std::cout << "========== " << __FUNCTION__ << std::endl;
+    out.push_back(in);
+    in.Clear();
+    return xrpc::PacketChecker::PACKET_FULL;
+  }
+
+  bool ZeroCopyDecode(const xrpc::ClientContextPtr& ctx, std::any&& in, xrpc::ProtocolPtr& out) {
+    std::cout << "========== " << __FUNCTION__ << std::endl;
+    auto buf = std::any_cast<xrpc::NoncontiguousBuffer&&>(in);
+    out->SetNonContiguousProtocolBody(std::move(buf));
+    return true;
+  }
+
+  bool ZeroCopyEncode(const xrpc::ClientContextPtr& context, const xrpc::ProtocolPtr& in,
+                      xrpc::NoncontiguousBuffer& out) override {
+    std::cout << "========== " << __FUNCTION__ << std::endl;
+    std::string message;
+    message += "GET /ok HTTP/1.1\r\n";
+    message += "Host: localhost\r\n\r\n";
+    out.Append(xrpc::CreateBufferSlow(message.c_str(), message.size()));
+    return true;
+  }
+};
+
+class SimpleHttpServiceProxy: public xrpc::ServiceProxy {
+ public:
+  void Call(const xrpc::ClientContextPtr& context) {
+    std::cout << "========== " << __FUNCTION__ << std::endl;
+    xrpc::ProtocolPtr& req_protocol = context->GetRequest();
+    xrpc::ProtocolPtr& rsp_protocol = context->GetResponse();
+    xrpc::Status status = ServiceProxy::UnaryInvoke(context, req_protocol, rsp_protocol);
+    auto res = dynamic_cast<xrpc::XrpcResponseProtocol*>(rsp_protocol.get());
+    std::cout << "response data: " << std::endl << xrpc::FlattenSlow(res->GetNonContiguousProtocolBody()) << std::endl;
+  }
+};
+
+void Start() {
+  xrpc::ClientCodecPtr codec(new SimpleHttpClientCodec());
+  xrpc::ClientCodecFactory::GetInstance()->Registry(codec->Name(), codec);
+
+
+  xrpc::ClientConfig client_config;
+  xrpc::XrpcClient client(client_config);
+
+  xrpc::ServiceProxyOption option;
+  option.name = "demo";
+  option.codec_name = "simple_http";
+  option.network = "tcp";
+  option.conn_type = "long";
+  option.selector_name = "direct";
+  option.target = "127.0.0.1:80";
+  option.threadmodel_type = xrpc::ThreadModelType::DEFAULT;
+  option.threadmodel_instance_name = "default_instance";
+
+  auto proxy = client.GetProxy<SimpleHttpServiceProxy>(option.name, &option);
+  proxy->Call(xrpc::MakeClientContext(proxy));
+}
+
+int main() {
+  xrpc::XrpcConfig::GetInstance()->Init("test_service_proxy.yaml");
+  xrpc::XrpcPlugin::GetInstance()->InitThreadModel();
+  xrpc::XrpcPlugin::GetInstance()->InitNaming();
+  Start();
+  xrpc::XrpcPlugin::GetInstance()->DestroyNaming();
+  xrpc::XrpcPlugin::GetInstance()->DestroyThreadModel();
+}
+```
+
 ## UML Class Diagram
 
 ```mermaid
