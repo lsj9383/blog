@@ -11,6 +11,8 @@
             - [Constexpr Function](#constexpr-function)
             - [Constexpr If](#constexpr-if)
         - [If/Switch Define Var](#ifswitch-define-var)
+        - [Initializer List](#initializer-list)
+        - [Aggregate initialization](#aggregate-initialization)
         - [Structured bindings](#structured-bindings)
         - [Type Inference](#type-inference)
     - [Class Constructor](#class-constructor)
@@ -287,6 +289,98 @@ int main() {
 ```
 
 switch 语句也是类似的。
+
+### Initializer List
+
+在 C++ 11 中开始提供了 Initializer List，详情可以参考 [std::initializer_list](https://en.cppreference.com/w/cpp/utility/initializer_list)。
+
+这个命名其实不是太好，容易和类成员函数的初始化列表搞混淆，因此一定要注意区分。在 cppreference.com 中提到：
+
+> not to be confused with member initializer list.
+
+```cpp
+template < class T >
+class initializer_list;
+```
+
+`std::initializer_list` 是一个容器，里面引用了多个 T 类型的对象，并提供了对 `const T` 的访问。
+
+我们开发 C++ 代码通常不会主动去构造 initializer_list，而是由 C++ 自动进行 initializer_list 的构造，因此我们需要看 C++ 有些自动构造 initializer_list 的场景：
+
+- 通过花括号初始化列表，进行列表初始化一个对象时，相应的构造函数会接收一个 `std::initializer_list` 对象：
+
+  ```cpp
+  class MagicFoo {
+   public:
+    MagicFoo(std::initializer_list<int> list) {}
+  };
+
+  int main() {
+    // 列表初始化
+    MagicFoo a = {1, 2, 3, 4, 5};
+    MagicFoo b{1, 2, 3, 4, 5};
+  }
+  ```
+
+- 花括号初始化列表作为赋值运算符右值时，或者作为函数参数调用时，相应函数会接收一个 `std::initializer_list` 对象。
+
+  ```cpp
+  class MagicFoo {
+   public:
+    test(std::initializer_list<int> list) {}
+    MagicFoo& operator=(std::initializer_list<int> list) { returh *this; }
+  };
+
+  int main() {
+    // 列表初始化
+    MagicFoo a;
+    a.test({1, 2, 3, 4, 5});
+    a = {1, 2}
+  }
+  ```
+
+- a braced-init-list is bound to auto, including in a ranged for loop.
+
+  ```cpp
+  auto al = {10, 11, 12};             // al 是 std::initializer_list
+
+  for (int x : {-1, -2, -3}) {        // {-1, -2, -3} 这个临时变量是 std::initializer_list
+    std::cout << x << std::endl;
+  }
+  ```
+
+### Aggregate initialization
+
+聚合初始化，是在 [Initializer List](#initializer-list) 基础上的延申，可以参考 [Aggregate initialization](https://en.cppreference.com/w/cpp/language/aggregate_initialization)。
+
+虽然在 [Initializer List](#initializer-list) 中，`{}` 中的所有元素类型必须相同，但是在 `Aggregate initialization` 场景下，`{}` 的每个元素类型不必相同。
+
+[Aggregate initialization](https://en.cppreference.com/w/cpp/language/aggregate_initialization) 列出了满足聚合的条件，我们直接看聚合初始化的效果：
+
+```cpp
+// demo 1
+struct A { int x; int y; int z; };
+A a{.y = 2, .x = 1}; // error; designator order does not match declaration order
+A b{.x = 1, .z = 2}; // ok, b.y initialized to 0
+
+
+// demo 2
+union u { int a; const char* b; };
+u f = { .b = "asdf" };         // OK, active member of the union is b
+u g = { .a = 1, .b = "asdf" }; // Error, only one initializer may be provided
+
+// demo 3
+struct A {
+  string str;
+  int n = 42;
+  int m = -1;
+};
+A{.m=21}  // Initializes str with {}, which calls the default constructor
+          // then initializes n with = 42
+          // then initializes m with = 21
+```
+
+
 
 ### Structured bindings
 
