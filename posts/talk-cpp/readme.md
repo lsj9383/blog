@@ -9,6 +9,9 @@
         - [Constexpr](#constexpr)
             - [Constexpr Var](#constexpr-var)
             - [Constexpr Function](#constexpr-function)
+        - [If/Switch Define Var](#ifswitch-define-var)
+        - [Structured bindings](#structured-bindings)
+        - [Type Inference](#type-inference)
     - [Class Constructor](#class-constructor)
         - [Synthesized Constructor](#synthesized-constructor)
         - [Default Constructor](#default-constructor)
@@ -238,6 +241,77 @@ int main() {
 
 更多 C++ 11/14 在 constexpr 相关的限制，可以参考 [constexpr](https://zh.wikipedia.org/wiki/Constexpr)。
 
+### If/Switch Define Var
+
+我们在 for 循环语句中非常容易定义一个仅在 for 语句块内使用的变量：
+
+```cpp
+for (int i = 0; i < 10; ++i) {}
+```
+
+但是在以前，并不能定义仅 if/switch 语句块内使用的变量。
+
+在 C++ 17 对仅用作 if/switch 语句块的变量做了支持，可以参考 [selection statements with initializer](http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0305r1.html)。
+
+```cpp
+int main() {
+  if (int number = 10; number < 10) {
+    return 0;
+  } else {
+    return number;
+  }
+}
+```
+
+switch 语句也是类似的。
+
+### Structured bindings
+
+Structured bindings 是类似于其他脚本语言将一个集合拆成多个变量的技术，例如在 python 中，可以把一个二维数组进行拆分：
+
+```python
+a = [1, 2]
+x, y = a
+# x == 1
+# y == 2
+```
+
+C++ 17 支持类似的语法，这在 C++ 中叫做结构化绑定，可以参考 [Structured binding declaration](https://en.cppreference.com/w/cpp/language/structured_binding)。
+
+结构化绑定支持三种类型：
+
+- 绑定一个数组：
+
+  ```cpp
+  int a[2] = {1,2};
+ 
+  auto [x,y] = a;       // creates e[2], copies a into e, then x refers to e[0], y refers to e[1]
+  auto& [xr, yr] = a;   // xr refers to a[0], yr refers to a[1]
+  ```
+
+- 绑定一个 tuple-like 类型:
+
+  ```cpp
+  std::tuple<int, double, bool> tup(10, 5.3, true);
+  const auto& [a,b,c] = tup;
+  ```
+
+- 绑定一个 Class Member
+
+  ```cpp
+  class A {
+   public:
+    int a = 10;
+    bool b = true;
+  };
+
+  A a;
+  auto [x, y] = a;
+  ```
+
+
+### Type Inference
+
 ## Class Constructor
 
 ### Synthesized Constructor
@@ -416,3 +490,5 @@ Google C++ Code Style 会建议我们：
 1. [C++ 11 智能指针的简单对比](https://simonfang1.github.io/blog/2018/08/23/smart-pointer/)
 1. [C 语言中的变长数组与零长数组](https://xhy3054.github.io/c-ArrayOfVariableLength/)
 1. [6.20 Arrays of Variable Length](https://gcc.gnu.org/onlinedocs/gcc/Variable-Length.html)
+1. [Selection statements with initializer](http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0305r1.html)
+1. [Structured binding declaration](https://en.cppreference.com/w/cpp/language/structured_binding)
