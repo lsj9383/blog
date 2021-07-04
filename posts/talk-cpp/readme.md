@@ -9,6 +9,7 @@
         - [Constexpr](#constexpr)
             - [Constexpr Var](#constexpr-var)
             - [Constexpr Function](#constexpr-function)
+            - [Constexpr If](#constexpr-if)
         - [If/Switch Define Var](#ifswitch-define-var)
         - [Structured bindings](#structured-bindings)
         - [Type Inference](#type-inference)
@@ -240,6 +241,28 @@ int main() {
 执行 `g++ test.cc -std=c++14` 并不会感受到编译变慢，而是在运行时感受到变慢，这是因为 constexpr function 不满足编译时运行的条件，因此在编译期间不运行。当这种情况时，constexpr function 返回的已不再是 constexpr 了，因此若使用 `constexpr int b = fun(n)` 会编译错误。
 
 更多 C++ 11/14 在 constexpr 相关的限制，可以参考 [constexpr](https://zh.wikipedia.org/wiki/Constexpr)。
+
+#### Constexpr If
+
+在 C++ 17 开始，可以为 if 语句使用 constexpr，以提前计算出常量表达式会使用的分支，具体请看：[if statement](https://en.cppreference.com/w/cpp/language/if)。
+
+Constexpr If 要求 if 的 condition express 是一个常量表达式：
+
+```cpp
+#include <iostream>
+  
+int main() {
+  constexpr int a = 10;
+  if constexpr (a) {
+    std::cout << "if" << std::endl;
+  } else {
+    std::cout << "else" << std::endl;
+  }
+  return 0;
+}
+```
+
+要求使用 C++ 17 进行编译：`g++ test.cc -std=c++17`。
 
 ### If/Switch Define Var
 
