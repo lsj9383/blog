@@ -23,7 +23,6 @@
         - [Const Overload](#const-overload)
     - [Left/Right Value](#leftright-value)
     - [Template](#template)
-    - [Lambda](#lambda)
     - [References](#references)
 
 <!-- /TOC -->
@@ -892,8 +891,6 @@ Google C++ Code Style 会建议我们：
 ## Left/Right Value
 
 ## Template
-
-## Lambda
 
 ## References
 
