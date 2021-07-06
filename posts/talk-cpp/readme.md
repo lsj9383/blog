@@ -7,19 +7,18 @@
     - [Language Usability Enhancements](#language-usability-enhancements)
         - [Variable Length Array](#variable-length-array)
         - [Constexpr](#constexpr)
-            - [Constexpr Var](#constexpr-var)
-            - [Constexpr Function](#constexpr-function)
-            - [Constexpr If](#constexpr-if)
         - [If/Switch Define Var](#ifswitch-define-var)
         - [Initializer List](#initializer-list)
         - [Aggregate initialization](#aggregate-initialization)
         - [Structured bindings](#structured-bindings)
         - [Type Inference](#type-inference)
+    - [Language Runtime Enhancements](#language-runtime-enhancements)
+        - [Lambda Expression](#lambda-expression)
+    - [Function Object Wrapper](#function-object-wrapper)
     - [Class Constructor](#class-constructor)
         - [Synthesized Constructor](#synthesized-constructor)
         - [Default Constructor](#default-constructor)
         - [Converting Constructor](#converting-constructor)
-        - [List](#list)
         - [Delete Constructor](#delete-constructor)
         - [Const Overload](#const-overload)
     - [Left/Right Value](#leftright-value)
@@ -535,6 +534,122 @@ auto add2(T x, U y) {
 }
 ```
 
+## Language Runtime Enhancements
+
+语言运行期的强化，主要参考了 [现代 C++ 教程](https://changkun.de/modern-cpp/zh-cn/03-runtime/index.html) 的第 3 章，并在此基础上做了很多补充。
+
+### Lambda Expression
+
+Lambda 是 C++ 中的匿名函数，Lambda 的详细信息可以参考 [Lambda expressions](https://en.cppreference.com/w/cpp/language/lambda)。
+
+Lambda 表达式格式有多种，完整的 Lambda 表示是比较复杂的，我们一般常用的格式如下：
+
+```text
+[ captures ] ( params ) <mutable> { body }
+```
+
+Lambda 表达式的返回值类型是由其中的 return 语句进行推导的，因此要求 return 都返回相同的类型。
+
+为了在 Lambda 表达式的函数体中使用 Lambda 表达式外的变量，需要通过捕获列表将上下文中的变量捕获，以传入 Lambda 表达式。
+
+有四种捕获方式：
+
+- 值捕获：
+
+  ```cpp
+  int value = 1;
+  auto fun = [value] { return value; };
+  auto r = fun();
+  ```
+
+- 引用捕获：
+
+  ```cpp
+  std::string value = "12345ABCDE";
+  auto fun = [&value] { return value; };
+  auto r = fun();
+  ```
+
+- 手动写捕获哪些变量可能是比较麻烦的，可以通过直接使用 `[=]` 或 `[&]` 捕获 Lambda 外层上下文中所有的变量。
+
+  ```cpp
+  std::string value = "12345ABCDE";
+  auto fun1 = [&] { return value; };
+  auto r1 = fun1();
+
+  auto fun2 = [=] { return value; };
+  auto r2 = fun2();
+  ```
+
+- 表达式捕获，即可以通过 `value = express` 进行捕获，这种方式对于捕获右值或右值引用更加方便：
+
+  ```cpp
+  std::string value = "12345ABCDE";
+  auto fun = [value = std::move(value)] { return value; };
+  auto r = fun();
+  ```
+
+**注意：**
+
+- 捕获的参数默认是不可更改的，除非使用了 mutable 修饰 Lambda 表达式。
+
+除此外，还有一种范型 Lambda，顾名思义，就是 Lambda 对模版的支持。在 C++ 14 后，可以通过 auto 参数来支持：
+
+```cpp
+auto add = [](auto x, auto y) {
+    return x+y;
+};
+
+add(1, 2);
+add(1.1, 2.2);
+```
+
+**注意：**
+
+- auto 参数，只允许在 Lambda 表达式中使用，其他函数不能使用，必须用模版。
+
+有意思的事情来了，Lambda 表达式返回的类型到底是什么呢？我们通常使用 auto 变量去接住 Lambda 表达式的返回值，但是这在向函数传递该变量的时候是不方便的，因为声明函数的时候就需要指定接收的 Lambda 表达式类型。
+
+很多同学都知道，Lambda 函数的变量，在 C++ 中通常使用 `std::function<>` 类型，例如：
+
+```cpp
+#include <functional>
+
+std::function<void(void)> fun = [](){};
+```
+
+那么 Lambda 表达式的类型就是 `std::function<>` ？
+
+其实并不是的，`std::function<>` 是对真正类型进行的包装。参考 [Type of a lambda function, using auto](https://stackoverflow.com/questions/41121441/type-of-a-lambda-function-using-auto) 和 [What is the type of lambda when deduced with “auto” in C++11?](https://stackoverflow.com/questions/7951377/what-is-the-type-of-lambda-when-deduced-with-auto-in-c11) 这两篇讨论，Lambda 表达式的类型属于特殊的未命名类型：
+
+> The type of a lambda expression is unspecified.
+
+Lambda 表达式实际上是一种语法糖，对于这样的一个 Lambda 表达式：
+
+```cpp
+int a  = 10;
+auto fun = [](int a) { return 10; }
+```
+
+会被 C++ 编译器进行如下转换：
+
+```cpp
+int a = 10;
+
+struct /* unnamed */ {
+
+    // function body
+    auto operator()(int a) const {
+        return a;
+    }
+
+} fun; // <- instance name
+```
+
+综上，Lambda 表达式类型属于未命名类型，又因为实现了 `operator()`，因此 Lambda 表达式可调用，`std::function<>` 只是可调用对象的包装器。
+
+## Function Object Wrapper
+
 ## Class Constructor
 
 ### Synthesized Constructor
@@ -693,10 +808,7 @@ Google C++ Code Style 会建议我们：
 
 > 不要定义隐式类型转换. 对于转换运算符和单参数构造函数, 请使用 explicit 关键字.
 
-### List 
-
 ### Delete Constructor
-
 
 ### Const Overload
 
@@ -715,3 +827,6 @@ Google C++ Code Style 会建议我们：
 1. [6.20 Arrays of Variable Length](https://gcc.gnu.org/onlinedocs/gcc/Variable-Length.html)
 1. [Selection statements with initializer](http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0305r1.html)
 1. [Structured binding declaration](https://en.cppreference.com/w/cpp/language/structured_binding)
+1. [话说 C++ 中的左值、纯右值、将亡值](https://www.cnblogs.com/zpcdbky/p/5275959.html)
+1. [C++ Rvalue References Explained](http://thbecker.net/articles/rvalue_references/section_01.html)
+1. [C++ 11 移动构造函数详解](http://c.biancheng.net/view/7847.html)
