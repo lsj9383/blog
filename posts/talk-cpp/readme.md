@@ -650,6 +650,83 @@ struct /* unnamed */ {
 
 ## Function Object Wrapper
 
+一个函数，甚至一个 Lambda 匿名函数，我们如何将其作为参数进行传递和使用呢？
+
+主要由两种方法：
+
+- 使用函数指针。
+
+  ```cpp
+  // Funpointer1 和 Funpointer2 都是对函数指针的定义
+  // Funpointer1 使用老式的 typedef 方式
+  // Funpointer2 使用 C++ 11 的 using 定义方式
+  typedef int (*Funpointer1)(void);
+  using Funpointer2 = int(*)(void);
+
+  int fun() {
+    return 10;
+  }
+
+  Funpointer1 p1 = fun;
+  Funpointer2 p2 = fun;
+
+  // typedef ori new 是 typedef 的典型用法，但是 typdef 定义函数指针时却打破了这一规则，增加了理解的复杂度
+  // using 方式更加简单直观，现在一般推荐使用过 using 方式
+  ```
+
+- 使用 `std::function`。
+
+  ```cpp
+  #include <functional>
+
+  int fun() {
+    return 10;
+  }
+
+  std::function<int(void)> f = fun;
+  ```
+
+后者更加通用，直观，因此 C++ 11 后，通常使用 `std::function<>`，并且要使用该对类，需要引入头文件：`#include <functional>`。
+
+在某些场景下，我们需要特化函数中的某些值，可以使用 `std::bind()`，将函数的某些参数和具体的值绑定在一起，具体可以参考 [std::bind](https://en.cppreference.com/w/cpp/utility/functional/bind)。
+
+用一个 Demo 快速阐述 bind 的作用：
+
+```cpp
+int add(int a, int b, int c) {
+  return a + b + c;
+}
+
+// std::function<int(int, int)> newadd = std::bind(add, std::placeholders::_1, 2, std::placeholders::_2);
+auto newadd = std::bind(add, std::placeholders::_1, 2, std::placeholders::_2);
+std::cout << newadd(10, 20) << std::endl;
+```
+
+`std::placeholders::_x`，代表该位置的参数不需要特例化，由函数调用时传入。
+
+**注意：**
+
+- 和 Lambda 函数一样，`std::bind()` 返回的函数类型属于 `unspecified`，但是因为属于可调用对象，所以可以被 `std::function<>` 包装。
+- 如果我们要将对象的方法像函数一样传递，可以使用 `std::bind`：
+
+  ```cpp
+  class A {
+   public:
+    A(const std::string& name): name_(name) {}
+    std::string Hello() { return "hello " + name_; }
+
+   private:
+    std::string name_;
+  };
+
+  int main() {
+    A a("arthur");
+    std::function<std::string(void)> fun = std::bind(&A::Hello, &a);
+    std::cout << fun() << std::endl;
+    return 0;
+  }
+  ```
+
 ## Class Constructor
 
 ### Synthesized Constructor
