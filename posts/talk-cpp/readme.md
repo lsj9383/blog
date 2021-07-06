@@ -14,7 +14,7 @@
         - [Type Inference](#type-inference)
     - [Language Runtime Enhancements](#language-runtime-enhancements)
         - [Lambda Expression](#lambda-expression)
-    - [Function Object Wrapper](#function-object-wrapper)
+        - [Function Object Wrapper](#function-object-wrapper)
     - [Class Constructor](#class-constructor)
         - [Synthesized Constructor](#synthesized-constructor)
         - [Default Constructor](#default-constructor)
@@ -648,7 +648,7 @@ struct /* unnamed */ {
 
 综上，Lambda 表达式类型属于未命名类型，又因为实现了 `operator()`，因此 Lambda 表达式可调用，`std::function<>` 只是可调用对象的包装器。
 
-## Function Object Wrapper
+### Function Object Wrapper
 
 一个函数，甚至一个 Lambda 匿名函数，我们如何将其作为参数进行传递和使用呢？
 
