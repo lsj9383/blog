@@ -1203,6 +1203,66 @@ C++ 中的基本类型，`int a = std::move(b)` 等价于赋值 `int a = b`。
 
 ### Perfect forwarding
 
+完美转发主要是用于在模版中使用右值引用，所引发的问题：
+
+```cpp
+void reference(int& v) {
+  std::cout << "左值" << std::endl;
+}
+
+void reference(int&& v) {
+  std::cout << "右值" << std::endl;
+}
+
+template <typename T>
+void pass(T&& v) {
+  std::cout << "普通传参:";
+  reference(v); // 始终调用 reference(int&)
+}
+
+int main() {
+  std::cout << "传递右值:" << std::endl;
+  pass(1);        // 1 是右值, 输出左值
+
+  std::cout << "传递左值:" << std::endl;
+  int m = 1;
+  pass(m);        // l 是左值, 输出左值
+
+  return 0;
+}
+```
+
+因为右值引用其变量也是左值，所以即便传入了右值 `1`，最终还是触发了 `reference(int& v)`。
+
+为了保持模版中的变量引用类型和传入时的一致，引入了 `std::forward()` 完美转发：
+
+```cpp
+void reference(int& v) {
+  std::cout << "左值" << std::endl;
+}
+
+void reference(int&& v) {
+  std::cout << "右值" << std::endl;
+}
+
+template <typename T>
+void pass(T&& v) {
+  std::cout << "普通传参:";
+  reference(std::forward<T>(v));
+}
+
+int main() {
+  std::cout << "传递右值:" << std::endl;
+  pass(1);        // 1 是右值, 输出右值
+
+  std::cout << "传递左值:" << std::endl;
+  int m = 1;
+  pass(m);        // l 是左值, 输出左值
+
+  return 0;
+}
+```
+
 ## Template
 
 ## References
