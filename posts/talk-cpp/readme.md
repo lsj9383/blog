@@ -1034,7 +1034,172 @@ int main()
 
 ### Move semantics
 
-理解了左值和右值后，可以看下移动语义了。首先，为什么我们需要移动语义？
+理解了左值和右值后，可以看下移动语义了。移动的意义是什么：
+
+- 语义上，目的是为了将一个对象的资源转移到另外一个对象。
+- 语法上，目的是为了触发移动构造函数或者移动赋值函数。
+
+我们常见的对象拷贝，通常是触发`拷贝构造函数`和`拷贝赋值函数`：
+
+```cpp
+std::vector<int> a {1, 2, 3, 4, 5};
+std::vector<int> b = a;     // 拷贝构造函数
+b = a;                      // 拷贝赋值函数
+```
+
+这两个拷贝函数，在语义是执行`深拷贝`，即将数据完全拷贝一份。很明显，这种方式在进行传递传递，和函数返回时，因为涉及到数据的反复拷贝，所以性能很差。为了解决这个问题，我们通常会使用引用或指针，但是这种方式降低代码的可读性，例如两个字符串的拼接：
+
+```cpp
+void Join(const std::string& s1, const std::string& s2, std::string* out) {
+  *out = s1 + s2;
+}
+
+std::string out;
+Join("123", "456", &out);
+```
+
+C++ 11 开始，新增了移动语义，这种方式并不会去进行深拷贝，而是将掌握的资源转给新的对象，自己不再拥有资源。
+
+```cpp
+std::vector<int> a {1, 2, 3, 4, 5};
+std::vector<int> b = std::move(a);
+
+std::cout << a.size() << std::endl;     // 0, 数据被转移走了
+std::cout << b.size() << std::endl;     // 5
+```
+
+转移的实现根本在于对象的 `移动构造函数` 和 `移动赋值函数` 的实现，例如这是一种可能的实现：
+
+```cpp
+public:
+  A() {
+    m_ = new std::string("hello");
+  }
+  ~A() {
+    if (m_ != nullptr) {
+      delete m_;
+    }
+  }
+
+  A(A&& rhs) {
+    m_ = rhs.m_;
+    rhs.m_ = nullptr;
+  }
+
+  A& operator=(A&& rhs) {
+    delete m_;
+    m_ = rhs.m_;
+    rhs.m_ = nullptr;
+    return *this;
+  }
+
+ public:
+  std::string* m_ = nullptr;
+};
+
+int main() {
+  A a;
+  std::cout << a.m_ << std::endl;
+
+  A b = std::move(a);
+  std::cout << a.m_ << std::endl;
+  std::cout << b.m_ << std::endl;
+
+  A c;
+  c = std::move(b);
+  std::cout << b.m_ << std::endl;
+  std::cout << c.m_ << std::endl;
+}
+```
+
+C++ 11 标准中的对象，都实现了移动语义转移资源，对于 std::string, std::vector 等容器类的使用变得方便起来，例如之前的 Join 可以改写为：
+
+```cpp
+std::string Join(const std::string& s1, const std::string& s2) {
+  std::string out = s1 + s2;
+  return std::move(out);
+}
+
+std::string out = Join("123", "456");
+```
+
+这种方式更加易读。需要注意的是，C++ 11 对返回值经过了编译器优化，会在返回的地方直接构造值，因此其实这样才是最高效和简单的：
+
+```cpp
+std::string Join(const std::string& s1, const std::string& s2) {
+  return s1 + s2;
+}
+
+std::string out = Join("123", "456");
+```
+
+另外一方面，在参数传递或 lambda 捕获的时候也可以使用 move，这是一个 lambda 捕获时的例子：
+
+```cpp
+std::string Join(const std::string& s1, const std::string& s2) {
+  return s1 + s2;
+}
+
+std::string s1 = "123";
+std::string s2 = "456";
+auto fun = [s1 = std::move(s1), s2 = std::move(s2)]() {
+  std::string out = Join(s1, s2);
+}
+
+fun();
+```
+
+捕获时使用 std::move 传递，是因为：
+
+- 值捕获，因为使用深拷贝，所以效率低。
+- 引用捕获，在使用 lambda 的时候可能引用已经不再可用了。
+
+当然，捕获后，被 std::move 的原本的值，都不再可用了。
+
+虽然 C++ 的类都实现了 move 语义，那我们实现的类如何快速支持 move 语义呢？答案是，自定义类原本就支持。
+
+自定义类，会生成默认的移动构造函数和移动赋值函数，也被称为`合成移动构造函数`和`合成移动赋值函数`，其效果是将所有的成员变量做 `std::move`，例如：
+
+```cpp
+struct A {
+  int a;
+  int b;
+  std::string c;
+  std::vector<int> d;
+};
+```
+
+其生成的默认移动构造函数和移动赋值函数是：
+
+```cpp
+struct A {
+  int a;
+  int b;
+  std::string c;
+  std::vector<int> d;
+
+  A(A&& rhs) {
+    a = std::move(rhs.a);
+    b = std::move(rhs.b);
+    c = std::move(rhs.c);
+    d = std::move(rhs.d);
+  }
+
+  A& operator=(A&& rhs) {
+    a = std::move(rhs.a);
+    b = std::move(rhs.b);
+    c = std::move(rhs.c);
+    d = std::move(rhs.d);
+    return *this;
+  }
+};
+```
+
+当然，生成合成版本的移动函数是有条件的，C++ Primer 指出：
+
+> 只有当一个类没有定义任何版本的拷贝函数，且所有非 static 的数据都能移动构造，或移动赋值时，编译器才会生成合成移动构造函数和合成移动赋值函数。
+
+C++ 中的基本类型，`int a = std::move(b)` 等价于赋值 `int a = b`。
 
 ### Perfect forwarding
 
