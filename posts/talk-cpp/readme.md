@@ -22,6 +22,9 @@
         - [Delete Constructor](#delete-constructor)
         - [Const Overload](#const-overload)
     - [Left/Right Value](#leftright-value)
+        - [Rvalue Reference & Lvalue Reference](#rvalue-reference--lvalue-reference)
+        - [Move semantics](#move-semantics)
+        - [Perfect forwarding](#perfect-forwarding)
     - [Template](#template)
     - [References](#references)
 
@@ -889,6 +892,151 @@ Google C++ Code Style 会建议我们：
 ### Const Overload
 
 ## Left/Right Value
+
+C++ 11 中通过引入右值引用的概念，支持了移动语义和完美转发。
+
+首先我们需要弄懂，到底什么是左值，什么是右值。一个最简单，且在 C++ 11 前一直沿用的一种粗糙理解是：
+
+```text
+可以在赋值符号左边的，就是左值。
+只能在赋值符号右边的，就是右值。
+```
+
+当然， 这种理解是非常粗糙的，要理解这个概念，我们先说说表达式，参考 [Value categories](https://en.cppreference.com/w/cpp/language/value_category) 中对表达式的阐述：
+
+> Each C++ expression (an operator with its operands, a literal, a variable name, etc.) is characterized by two independent properties: a type and a value category.
+
+即每个表达式都由运算符（operator）和运算对象（operands）构成，其中字面值和变量，是最简单的表达式。
+
+表达式一定会得到一个结果，即表达式是可求值的，表达式的结果右两种属性：
+
+1. 值类型(type)。
+1. 值类别(value categories)。
+
+我们说的左值右值，其实就是指的值类别，完整的说法是 `左值表达式` 和 `右值表达式`。
+
+值类别有以下几种：
+
+- 左值：lvalue。
+- 纯右值：pralue。
+- 将亡值：xvalue。
+
+**注意：**
+
+- lvalue 和 xvalue 合称：泛左值。
+- prvalue 和 xvalue 合称：右值。
+
+下图可以较为直观的看出其中的关系：
+
+![lrvalue](assets/lrvalue.png)
+
+当给出一个表达式时，我们怎么快速判断其值类别呢？事实上，这并没有一个事实的标准，但是有常用的方式：
+
+- 左值
+  - 描述：能够用 & 取地址的表达式是左值表达式。
+  - 示例：
+
+    ```cpp
+    int a = 42;       // a 是左值
+    int b = a;        // b 是左值
+    &("abc");         // 字面量 "abc" 是左值
+    ```
+
+- 纯右值
+  - 满足下列条件之一：
+    1. 本身就是赤裸裸的、纯粹的字面值，如 3、false；
+    1. 求值结果相当于字面值或是一个不具名的临时对象。
+  - C++ 11 前的右值就是指的纯右值。
+  - 示例：
+
+    ```cpp
+    42;           // 字面量 42 是右值
+    a + 32;       // 表达式 a + 32 是右值
+    foobar();     // 函数调用返回的是临时对象，所以是右值
+    ```
+
+- 将亡值
+  - “将亡值”概念的产生，是由右值引用的产生而引起的，将亡值与右值引用息息相关。所谓的将亡值表达式，就是下列表达式：
+    1. 返回右值引用的函数的调用表达式
+    1. 转换为右值引用的转换函数的调用表达式
+  - 示例：
+
+    ```cpp
+    int a = 10;
+    std::move(a);         // 将亡值表达式
+    std::move(a + 20);    // 将亡值表达式
+    ```
+
+### Rvalue Reference & Lvalue Reference
+
+在理解了左值和右值后，我们可以看下左值引用和右值引用。
+
+其实故名思意，左值引用就是对左值的引用，用 `T&` 表示，右值引用就是对右值的引用，用 `T&&` 表示，其中 T 代表被引用的数据类型。
+
+```cpp
+int main()
+{
+    std::string lv1 = "string,";            // lv1 是一个左值
+    std::string&& r1 = lv1;                 // 非法, 右值引用不能引用左值
+    std::string&& rv1 = std::move(lv1);     // 合法, std::move 可以将左值转移为右值
+
+    const std::string& lv2 = lv1 + lv1;     // 合法, 常量左值引用能够延长临时变量的生命周期
+    lv2 += "Test";                          // 非法, 常量引用无法被修改
+
+    std::string&& rv2 = lv1 + lv2;          // 合法, 右值引用延长临时对象生命周期
+    rv2 += "Test";                          // 合法, 非常量引用能够修改临时变量
+
+    return 0;
+}
+```
+
+左值引用在 C++ 11 前就已经被广泛使用，较容易理解，而右值引用，有两个作用：
+
+- 引用临时变量，延长临时变量的生命周期，避免进行拷贝。
+
+  ```cpp
+  std::vector<int>& fun() {
+    static std::vector<int> v {1, 2, 3, 4, 5};
+    return v;
+  }
+
+  int main() {
+    std::vector<int> v1 = fun();          // 触发拷贝构造函数
+    std::vector<int>& v2 = fun();         // 非法
+    const std::vector<int>& v3 = fun();   // 不会触发构造函数，只是一个引用
+    std::vector<int>&& v4 = fun();        // 不会触发构造函数，只是一个引用
+  }
+  ```
+
+- 触发右值引用为参数的函数，例如移动构造函数，移动赋值构造函数，对于这一部分，在 [Move semantics](#move-semantics) 中再详细阐述。
+
+  ```cpp
+  class A {
+   public:
+    A() = default;
+    A(const A& a) {}
+    A(A&& a) {}
+  };
+
+  int main() {
+    A a;                  // 默认构造函数
+    A b = a;              // 拷贝构造函数
+    A c = std::move(a)    // 移动拷贝构造函数
+  }
+  ```
+
+一个左值是不能直接（隐式）被右值引用的，若一个左值需要使用右值引用，需要通过 `std::move()` 强制将其转为右值，在上述的例子中已经看到了。
+
+需要注意的是：
+
+- 虽然右值临时变量会很快释放，但当被右值引用所指向时，临时变量生命周期会延长，直至右值引用生命周期结束。
+- 右值引用的变量名是一个左值，它所代表的是个右值。
+
+### Move semantics
+
+理解了左值和右值后，可以看下移动语义了。首先，为什么我们需要移动语义？
+
+### Perfect forwarding
 
 ## Template
 
