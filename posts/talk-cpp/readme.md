@@ -7,6 +7,9 @@
     - [Language Usability Enhancements](#language-usability-enhancements)
         - [Variable Length Array](#variable-length-array)
         - [Constexpr](#constexpr)
+            - [Constexpr Var](#constexpr-var)
+            - [Constexpr Function](#constexpr-function)
+            - [Constexpr If](#constexpr-if)
         - [If/Switch Define Var](#ifswitch-define-var)
         - [Initializer List](#initializer-list)
         - [Aggregate initialization](#aggregate-initialization)
@@ -15,6 +18,10 @@
     - [Language Runtime Enhancements](#language-runtime-enhancements)
         - [Lambda Expression](#lambda-expression)
         - [Function Object Wrapper](#function-object-wrapper)
+    - [Memory Management](#memory-management)
+        - [std::shared_ptr](#stdshared_ptr)
+        - [std::unique_ptr](#stdunique_ptr)
+        - [std::weak_ptr](#stdweak_ptr)
     - [Class Constructor](#class-constructor)
         - [Synthesized Constructor](#synthesized-constructor)
         - [Default Constructor](#default-constructor)
@@ -728,6 +735,75 @@ std::cout << newadd(10, 20) << std::endl;
     return 0;
   }
   ```
+
+## Memory Management
+
+C++ 中可以通过智能指针进行内存管理，这避免我们手动去使用 new/delete 创建对象和释放对象。
+
+在 C++ 中，存在多种智能指针，不同的智能指针对于对象的所有权是不同的：
+
+- shared_ptr，拥有对象的共享所有权，并且会使用引用计数判断对象是否被引用，若引用技术为 0 将会释放对象。
+- unique_ptr，拥有对象的唯一所有权，其他智能指针不能拥有该对象的所有权。可以通过 `std::move()` 转移所有权。
+- weak_ptr，和 shared_ptr 类似，但是该引用不会增加引用计数。可以通过 `expired()` 方法判断对象是否已经被释放。
+
+### std::shared_ptr
+
+`std::shared_ptr` 它能够记录多少个 shared_ptr 共同指向一个对象，当引用计数变为零的时候就会将对象自动删除，从而消除显式的调用 delete。
+
+```cpp
+#include <memory>
+#include <iostream>
+#include <string>
+
+int main() {
+  std::shared_ptr<std::string> p1(new std::string("hello world"));
+  std::cout << "p1.use_count(): " << p1.use_count() << std::endl;
+  auto p2 = p1;
+  std::cout << "p1.use_count(): " << p1.use_count() << std::endl;
+  std::cout << "p2.use_count(): " << p2.use_count() << std::endl;
+}
+```
+
+为了避免显示的调用 new 来创建对象，可以使用 `std::make_shared<T>(args)` 来创建对象，这会隐式的触发 `new T(args)`。
+
+```cpp
+std::shared_ptr<std::string> p1 = std::make_shared<std::string>("hello world");
+auto p2 = p1;
+```
+
+除此外，也可以通过 `get()` 获得原始对象：
+
+```cpp
+std::shared_ptr<std::string> p1 = std::make_shared<std::string>("hello world");
+std::string* p = p1.get();
+```
+
+### std::unique_ptr
+
+`std::unique_ptr` 是一种独占的智能指针，它禁止其他智能指针与其共享同一个对象，从而保证代码的安全，智能通过 `std::move()` 来转移所有权：
+
+```cpp
+std::unique_ptr<std::string> p1(new std::string("hello world"));
+std::unique_ptr<std::string> p2 = std::move(p1);
+std::unique_ptr<std::string> p3 = p1;     // 非法
+```
+
+通过 `std::move()` 转移所有权，p1 将不再引用对象，而是由 p2 引用对象，依然是一个智能指针独占对象，保证安全。
+
+unique_ptr 统一可以使用 `std::make_shared<T>()` 隐式创建对象，以及使用 `get()` 获得原始对象：
+
+```cpp
+std::unique_ptr<std::string> p1 = std::make_shared<std::string>("hello world");
+std::string* p = p1.get();
+```
+
+在早期 C++ 中还不存在 `std::unique_ptr`，类似的需求会使用另一种智能指针，即 `std::auto_ptr`，它也具有对象的唯一所有权，并在拷贝时会进行所有权的转移。
+
+这个 auto_ptr 的问题在于它不够安全，经常会有误用的情况。
+
+因此在 C++ 11 后，auto_ptr 被 unique_ptr 全面取代，并且在 C++ 17 中已经不再存在 auto_ptr 了。
+
+### std::weak_ptr
 
 ## Class Constructor
 
