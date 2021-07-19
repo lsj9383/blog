@@ -7,9 +7,6 @@
     - [Language Usability Enhancements](#language-usability-enhancements)
         - [Variable Length Array](#variable-length-array)
         - [Constexpr](#constexpr)
-            - [Constexpr Var](#constexpr-var)
-            - [Constexpr Function](#constexpr-function)
-            - [Constexpr If](#constexpr-if)
         - [If/Switch Define Var](#ifswitch-define-var)
         - [Initializer List](#initializer-list)
         - [Aggregate initialization](#aggregate-initialization)
@@ -797,11 +794,22 @@ std::unique_ptr<std::string> p1 = std::make_shared<std::string>("hello world");
 std::string* p = p1.get();
 ```
 
-在早期 C++ 中还不存在 `std::unique_ptr`，类似的需求会使用另一种智能指针，即 `std::auto_ptr`，它也具有对象的唯一所有权，并在拷贝时会进行所有权的转移。
+在早期 C++ 中还不存在 `std::unique_ptr`，类似的需求会使用另一种智能指针，即 `std::auto_ptr`，它也具有对象的唯一所有权，并在拷贝时会进行所有权的转移：
 
-这个 auto_ptr 的问题在于它不够安全，经常会有误用的情况。
+```cpp
+std::auto_ptr<std::string> s1(new std::string("abcd"));
+std::auto_ptr<std::string> s1 = s2;     // s2 指向的资源转交给了 s1, s2 不可以再使用
 
-因此在 C++ 11 后，auto_ptr 被 unique_ptr 全面取代，并且在 C++ 17 中已经不再存在 auto_ptr 了。
+std::cout << s1.get() << std::endl;     // nullptr
+```
+
+auto_ptr 存在以下问题：
+
+- auto_ptr 不能指向数组，因为 auto_ptr 在释放资源时使用 delete object，而不会使用 delete [] objects。
+- 资源转移不够安全，在 unique_ptr 中通过显式的 std::move() 进行资源转移。
+- 由于 auto_ptr 的赋值导致的资源转移，使其不适合在 STL 容器中进行使用。
+
+因为 auto_ptr 的种种缺点，在 C++ 11 后，auto_ptr 被 unique_ptr 取代（但仍然可用），知道 C++ 17 中已经不再存在 auto_ptr 了。
 
 ### std::weak_ptr
 
