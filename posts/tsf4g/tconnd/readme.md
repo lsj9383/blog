@@ -10,9 +10,9 @@
         - [GCP Mode](#gcp-mode)
     - [Tconnd FRAME](#tconnd-frame)
     - [Connection](#connection)
-        - [Connection Build](#connection-build)
-        - [Connection Queue](#connection-queue)
-        - [Connection Relay](#connection-relay)
+        - [Connect](#connect)
+        - [Relay](#relay)
+        - [Queue](#queue)
     - [AuthN](#authn)
     - [References](#references)
 
@@ -176,11 +176,13 @@ Tconnd 长连接和短连接的区别：
 连接关闭或异常断开 | 发送 STOP 消息。 | 不发送 STOP 消息。
 iID 校验 | 检查是否一致，如果不一致则丢弃消息。 | 不检查 iID，而是检查 tframehead.IP/PORT，如果不一致则丢弃消息。
 
-### Connection Build
+### Connect
 
-### Connection Queue
+这里提供 Game Client 连接建立流程，以及 Game Server 如何接受一个连接：
 
-### Connection Relay
+### Relay
+
+### Queue
 
 ## AuthN
 
