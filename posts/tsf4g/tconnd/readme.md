@@ -11,9 +11,13 @@
     - [Tconnd FRAME](#tconnd-frame)
     - [Connection](#connection)
         - [Connect](#connect)
+        - [Close](#close)
         - [Relay](#relay)
+        - [Route](#route)
         - [Queue](#queue)
+    - [Application Message](#application-message)
     - [AuthN](#authn)
+    - [Event Programe](#event-programe)
     - [References](#references)
 
 <!-- /TOC -->
@@ -178,11 +182,197 @@ iID 校验 | 检查是否一致，如果不一致则丢弃消息。 | 不检查 
 
 ### Connect
 
-这里提供 Game Client 连接建立流程，以及 Game Server 如何接受一个连接：
+这里提供 Game Client 连接建立流程，以及 Game Server 如何接受一个连接。
+
+首先看一下 TDR Mode，这是一种简单的方式，这种方式没有鉴权，而且START 消息可以携带应用层数据（无论是 START 请求或是 START 响应）：
+  
+![tdr-connect](assets/tdr-connect.png)
+
+GCP Mode 是我们通常会选择的方式，在建立连接时，TConnd 会对用户身份进行鉴权，请参考 [AutnN](#authn)。
+
+除此外，GCP Mode 下建立连接会对通信信道的加密，保证鉴权凭证，应用层数据等安全传输。这是一个基于 DH Key 交换的连接建立流程:
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant client as Game Client
+participant tconnd as TConnd Server
+participant aps as APS
+participant server as Game Server
+
+client ->> tconnd: SYN 明文
+tconnd ->> aps: DH 交换密钥请求
+aps ->> aps: 生成通信的 Key
+aps -->> tconnd: DH 响应
+tconnd --> client: 交换通信 Key
+
+client ->> tconnd: 带上用户身份票据，密文
+tconnd ->> aps: 票据鉴权请求
+aps ->> aps: 校验票据
+aps -->> tconnd: 鉴权响应
+
+tconnd ->> aps: ID 映射请求，通常将 string 类型的用户 id 映射到 uint64
+aps -->> tconnd: ID 映射响应
+tconnd --> client: 鉴权返回，密文
+
+tconnd ->> tconnd: 连接排队判断
+tconnd ->> server: START 消息请求
+server -->> tconnd: START 消息响应
+tconnd -->> client: BINGO 密文
+```
+
+Game Client 连接建立的一个伪代码:
+
+```cpp
+int service_id = 2;
+int platform = TGCP_ANDROID;
+int auth_mode = TGCP_AUTH_NONE;
+int encrypt_method = TGCP_ENCRYPT_METHOD_AES;
+int key_making_method = TGCP_KEY_MAKING_INSVR;
+int max_gamedata_len = 10240;
+char* pszToken = "OezXcEiiBSKSxW0eoylIeKQ_2ms051l34J6BWkiyD....";
+int timeout = 50000;  //50s
+
+// 初始化连接的句柄
+HTGCPAPI handle;
+int rc = tgcpapi_create(&handle);
+
+// 设置连接的通信方式，并初始化
+rc = tgcpapi_init(handle, service_id, platform, auth_mode, encrypt_method,
+                  key_making_method, max_gamedata_len);
+
+// 设置连接的账号和凭证
+TGCPACCOUNT account;
+stAccount.uType = TGCP_ACCOUNT_TYPE_NONE;
+stAccount.bFormat = TGCP_ACCOUNT_FORMAT_STRING;
+strncpy(stAccount.stAccountValue.szID, "test account", sizeof(stAccount.stAccountValue.szID));
+rc = tgcpapi_set_token(handle, pszToken, strlen(pszToken));
+rc = tgcpapi_set_account(handle, &account);
+
+// 建立连接，并等待直到超时
+rc = tgcpapi_start_connection(handle, "127.0.0.1:8080", timeout);
+
+// 连接正常，但是处于排队中
+if (rc == TGCP_ERR_STAY_IN_QUEUE) {
+  int iBingo = -1;
+  QUEUENOTIFY stNotify;
+
+  // 一直轮询直到成功
+  while(iBingo <= 0) {
+    tgcpapi_query_wait_notify(handle, &iBingo, &stNotify, timeout);
+  }
+}
+```
+
+除此外，也可以使用事件机制，异步建立连接，请参考 [Event Programe](#event-programe)。
+
+### Close
+
+连接断开有两种原因：
+
+- 正常断开：
+  - Game Client 主动断开，Game Client 主动发送 Socket Close 时会进行 Game Client 的主动断开。
+
+    ![client-close](assets/client-close.png)
+
+  - Game Server 主动断开，Game Server 主动发送 STOP 消息时，进行主动断开。
+
+    ![server-close](assets/server-close.png)
+
+  - TConnd Server 主动断开，TConnd 检查到错误时或关闭时会进行主动断开。
+
+    ![tconnd-close](assets/tconnd-close.png)
+
+- 异常断开，客户端异常关闭 TCP 连接导致，通常对应的是 RST。
+
+  ![exception-close](assets/exception-close.png)
+
+连接异常断开可以进行重连，甚至也可以配置为正常断开的情况下也能进行重连，关于连接重连的信息请参考 [Relay](#relay)。
+
+Game Client 断开连接需要关闭 Socket，也需要释放连接句柄，伪代码：
+
+```cpp
+//close
+tgcpapi_close_connection(pHandle);
+
+//fini, 与 init 相对
+tgcpapi_fini(pHandle);
+
+//destroy, 与 create 相对，释放内存。
+tgcpapi_destroy(&pHandle);
+```
 
 ### Relay
 
+通常有两种情况会使用断线重连：
+
+- TCP 连接异常运行进行断线重连，这种方式默认就支持
+- Game Client 正常连接关闭后，也能进行断线重连。要支持这种方式，需要在 TConnd Server 中配置：`EnlargeReconnScopeFlag`。
+
+对于后者的支持，主要是为了满足移动端屏幕关闭的背景，因为移动端关闭屏幕时会自动发送连接关闭请求，为了对处理这类的重连，需要针对正常关闭也能进行重连。
+
+如果满足上述条件的连接关闭，TConnd 不会立即关闭连接，而是等待一段时间（由 `ReconnValidSec` 决定等待时间，如果为 0 则不支持断线重连）。
+
+在客户端，当客户端检测到连接异常断开后，可以发起断线重连请求，发起断线重连会带上 TCONND 下发的身份信息。
+
+TConnd 在收到客户端的断线重连请求后，不会去做登录鉴权，而是直接验证身份信息是否合法，如果合法则认为连接重连成功，给后端 Game Server 发送 Relay 请求，而对于旧连接则直接释放，不再发 STOP 包。
+
+```mermaid
+sequenceDiagram
+autonumber
+
+participant client as Game Client
+participant tconnd as TConnd Server
+participant server as Game Server
+
+client ->> tconnd: SYN + Relay
+tconnd ->> tconnd: Relay 身份校验
+
+tconnd ->> server: RELAY 消息，并携带旧的连接 iID
+server -->> tconnd: 可以设置新的 iID，也可以复用之前的
+
+tconnd -->> client: BINGO
+```
+
+在 GCP 模式中客户端的断线重连请求除了身份信息外，还携带了鉴权数据。
+
+当 TConnd 发现重连校验失败后，就会走新创建连接的流程，在鉴权通过后，给 Game Server 发送 START 消息，并将 START 消息中的 RelayFlag 置为 1，以此来提示 Game Server 这是一个断线重连失败的新建连接请求，Game Server 可以根据这个字段来做相应的处理。
+
+Game Client 的重连伪代码:
+
+```cpp
+// 设置凭证，用于重连校验失败时，使用凭着建立新连接
+rc = tgcpapi_set_token(handle, token, strlen(token));
+
+// 重连请求
+rc = tgcpapi_relay_connection(handle, "127.0.0.1:8080", timeout);
+```
+
+### Route
+
+Game Server 负责处理游戏逻辑，其高负荷的 CPU 密集型处理可能会成为瓶颈，为了方便进行水平扩容，一个 TConnd 可以挂上多个 Game Server：
+
+![tconnd-route](assets/tconnd-route.png)
+
+TConnd Server 的路由选择是在连接建立的时刻进行的，例如上图中，Game Client 1 建立连接时 TConnd Server 将其路由给 Game Server 1，后续在这个连接上， Game Client 1 的所有数据包都是发送给 Game Server 1。
+
 ### Queue
+
+为了保护 Game Server，TConnd 提供了排队机制。
+
+这个排队是针对连接建立而言的，在连接建立时，会做两个维度的限制：
+
+1. 连接总数。通过配置 `Permit` 指定 TConnd 可以维持的总连接个数。当连接超过了这个个数，TConnd 会把连接进行排队，只有当之前有连接关闭时，才会激活排队中的连接。
+1. 连接速度。通过配置 `Speed` 指定 TConnd 建立连接的速度，避免对 TConnd 瞬间带来太大压力。
+
+## Application Message
+
+无论什么方式，应用层消息传输方式几乎是统一的，通用方式如下图所示：
+
+![application-message](assets/application-message.png)
+
+从图中可以看出，对于应用层数据，会通过 INPROC 消息发送给 Game Server。
 
 ## AuthN
 
@@ -194,6 +384,7 @@ iID 校验 | 检查是否一致，如果不一致则丢弃消息。 | 不检查 
 - JWT
 - 其他
 
+## Event Programe
 
 ## References
 

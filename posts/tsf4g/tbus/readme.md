@@ -10,6 +10,11 @@
 
 ## Overview
 
+TBus 为 Game Server 提供两套 API 进行使用:
+
+- tbus_api，这种方式需要使用 tconnapi_decode 去掉 tfreamehead。
+- tconnapi，推荐使用这种方式。
+
 ## Appendix: Shared Memory
 
 Tconnd 接收到数据会，通过 TBus 的共享内存机制将数据转发给 Game Svr，这里对共享内存做一点阐述。
