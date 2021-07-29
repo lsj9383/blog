@@ -741,7 +741,7 @@ Demo:
       <Url>10.1.2.1<Url>
     </Serializers>
     <Serializers type="Serializer">
-      <Name>ListView</Name>
+      <Name>LisViewer</Name>
       <Url>10.1.2.2<Url>
     </Serializers>
   </SerializerList>
@@ -750,6 +750,99 @@ Demo:
 ```
 
 ### NetTrans Config
+
+NetTrans 用已经配置好的 Serailizer、PDU、Lisntener 去构造一个网络传输通道，存在如下配置：
+
+Config | Default | Description
+-|-|-
+Name | - | NetTrans 的实例名字。
+UseTimeStamp | 0 | 发送到 Game Server 的数据是否带时间戳。0 不带时间戳，否则带。
+UseWaitQueue | 0 | 客户端排队开关，0 表示不进行排队判断，否则判断是否需要排队。
+PDU | default | 配置使用的 PDU，用于指明传输通道的分包方式。
+Listener | default | 配置使用的 Listener，用于指明传输通道使用的监听器。
+Serializer | default | 配置使用的 Serializer，用于指明传输通道使用的串行方式。
+LisViewer | - | 上行消息旁路接收器。如果旁路配置打开，且配置了该项，则将消息抄送一份给 LisViewer，LisViewer 来自于 Serializer 的配置。
+SerViewer | - | Serializer 旁路接收器名称。如果旁路配置打开，且配置了该项，则 TConnd 从 Serializer 中取出数据发送给客户端后，还会发一份给 SerVierer。
+ConnLimit | - | 连接排队配置，是一个结构体，在后续表格给出。
+TransLimit | - | 传输限制，是一个结构体，在后续表格给出。
+SendMode | 0 | TConnd 到 Game Server 的发送方式。0 代表 TConnd 会向 Serializers 所有实例发送数据；1 会轮询给 Serializers 发数据，每次请求都会换一个 Serailizer。
+CarryAccountFlag | 0 | TConnd 往后端 SVR 的 INPROC 包中是否携带 ACCOUNT 信息。0 表示不携带。
+UseTcpSerializer | 0 | 是否使用 TCP 序列化器。
+TcpSerailizerListener | - | TCP 序列化器的具体配置，在后续表格给出。
+FixedExtend | 0 | 用于表示 TFRAME 协议中 FrameHead.Extend 的使用方法。<br>0，TConnd 发给 Game Server 上行包中的 Extend 字段为上一次 Game Server 发给 TConnd 中的值。<br>1， TConnd 发给 Game Server 上行包中的 Extend 来自于 START/RELAY 包中的 Extend，且后续都不会再改变。
+PacketMergeConfig | - | 包合并的配置，在后续表格给出。
+StopListenWhenSvrDown | 0 | 通过心跳，TConnd 定期检查 Game Server 状态，若 Game Server 无响应，则 TConnd 关闭对 Lisntener 的监听。0 不开启，否则开启。
+
+ConnLimit 连接排队配置如下：
+
+Config | Default | Description
+-|-|-
+Permit | 0 | 连接排队阈值，超过该值才会进行排队。
+Speed | 0 | 每一秒从的队列放行的连接数。0 代表不限制。
+QueueNotifyInterval | 0 | 排队通知时间间隔，0 代表不通知。
+QueueUpdateInterval | 60 | 排队时间采样频率。
+QueueSampleCount | 30 | 排队时间采用最大样本。
+
+TransLimit 传输现在结构如下：
+
+Config | Default | Description
+-|-|-
+PkgSpeed | 0 | 最大的收包速度。0 代表不限制。
+ByteSpeed | 0 | 最大收字节流速度。0 代表不限制。
+LimitAction | 1 | 超过客户端限速是否断开连接。PkgSpeed 和 ByteSpeed 速度不为 0 时有效。0，不断开连接只是丢包；1，断开连接。
+
+Demo:
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+  <PDUList type="PDUList">
+    <Count>1</Count>
+    <PDUs type="PDU">
+      <Count>1</Count>
+      <Name>default</Name>
+      <LenParsertype>PDULENPARSERID_BY_GCP</LenParsertype>
+      <LenParser type="PDULenParser">
+        <GCPParser type="PDULenParser">
+          <KeyMethod>2</KeyMethod>
+          <EncMethod>3</EncMethod>
+        </GCPParser>
+      </LenParser>
+    </PDUs>
+  </PDUList>
+
+  <ListenerList type="ListenerList">
+    <Count>1</Count>
+    <Listeners type="Listener">
+      <Name>default</Name>
+      <Url>tcp://127.0.0.1:6666</Url>
+      <SendBuff>131072</SendBuff>
+      <RecvBuff>131072</RecvBuff>
+      <MaxIdle>0</MaxIdle>
+      <Backlog>128</Backlog>
+      <NoDelay>0</NoDelay>
+    </Listeners>
+  </ListenerList>
+
+  <SerializerList type="SerializerList">
+    <Count>2</Count>
+    <Serializers type="Serializer">
+      <Name>default</Name>
+      <Url>10.1.2.1<Url>
+    </Serializers>
+    <Serializers type="Serializer">
+      <Name>LisViewer</Name>
+      <Url>10.1.2.2<Url>
+    </Serializers>
+  </SerializerList>
+
+</tconnd>
+```
 
 ## Log
 
