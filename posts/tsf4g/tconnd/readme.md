@@ -18,6 +18,11 @@
     - [Application Message](#application-message)
     - [AuthN](#authn)
     - [Event Programe](#event-programe)
+    - [Config](#config)
+        - [Base Config](#base-config)
+        - [TDR Config](#tdr-config)
+        - [PDU Config](#pdu-config)
+    - [Log](#log)
     - [References](#references)
 
 <!-- /TOC -->
@@ -356,7 +361,243 @@ TConnd Server 的路由选择是在连接建立的时刻进行的，例如上图
 - JWT
 - 其他
 
+这里会针对微信鉴权方式进行讨论，其他鉴权方式是类似的。
+
+除此外，GCP 也提供了无鉴权模式：
+
+```xml
+<LenParser type="PDULenPaser">
+  <GCPParser type="PDULenGCPParser">
+    <KeyMethod>SERVER</KeyMethod>
+    <EncMethod>TCONN_SEC_AES</EncMethod>
+    <EnableNoAuth>0x1</EnableNoAuth>
+  </GCPParser>
+</LenPaser>
+```
+
+EnableNoAuth 取值：
+
+EnableNoAuth | Description
+-|-
+0 | 不允许客户端无鉴权。
+1 | 表示以客户端的 AuthType 为准，客户端如果指定不鉴权则 TConnd 直接跳过鉴权，客户端如果指定鉴权，则走鉴权流程。
+2 | 对所有连接均不鉴权。
+
 ## Event Programe
+
+## Config
+
+部署 TConnd 最重要的是 TConnd 的配置文件，TConnd 是通过 XML 文件进行配置的：
+
+```xml
+<!-- TConnd 是比较老的，那个年代流行 GBK -->
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+<!-- TConnd 配置项 -->
+
+</tconnd>
+```
+
+TConnd 配置项主要分以下几个部分：
+
+- 基本配置，是 TConnd 的基本配置，是进程和系统层面的，例如线程数，文件描述符限制等。
+- TDR 配置项，指出 TDR 数据包结构，GCP 模式一般不需要该配置项。
+- PDU（数据协议单元） 配置项，指出协议如何分包。
+- Serializer 器配置项，指出如何向 Game Server 收发数据。
+- Listener 配置项，负责监听、接收连接、收发数据等。
+- NetTrans 配置项，负责将 PDU 配置项、Serializer 配置项、Listener 配置项关联起来，构建网络传输通道。
+
+### Base Config
+
+基本配置通过下述表格呈现：
+
+Config | Default | Description
+-|-|-
+ConnLogFlag | 0 | 是否记录用户流水日志，0 表示不记录，1 表示记录。
+ThreadNum | 0 | 指定运行的工作线程个数，0 表示单线程。
+ThreadQueSize | 20480 | 工作线程队列大小，单位为 K。
+EnableViewer | 0 | 是否运行胖了功能，0 表示关闭旁路侦听，否则开启。
+MaxFD | 10240 | TConnd 进程运行的最大网络连接数。若该值大于系统所设置，则会去修改系统所设置的值。
+
+Demo:
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+</tconnd>
+```
+
+### TDR Config
+
+指出 TDR 数据包结构，因为 GCP 模式的 TDR 协议格式是特殊且规定好的，因此该模式不会有该配置项。
+
+**注意：**
+
+- 虽然 QQ 模式也有预定义的 TDR 通信协议，但应用仍然可以自定义业务协议。
+
+TDR 配置项通过下述表格呈现：
+
+Config | Default | Description
+-|-|-
+Count | 1 | TDR 数据结构个数。
+Name | default | TDR 数据结构的名称，方便 TConnd 检索该数据结构。
+Path | - | TDR 结构文件路径。
+
+TDR 配置项被 TDRList 包住，并以 TDRs 列表形式给出。
+
+Demo:
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+  <TDRList type="TDRList">
+    <Count>1</Count>
+    <TDRs type="TDR">
+      <Name>default</Name>
+      <Path>./sample.tdr</Name>
+    </TDRs>
+  </TDRList>
+
+</tconnd>
+```
+
+### PDU Config
+
+PDU 配置项是指出使用的分包方式，分包方式有多种，每种分包模式的 PDU 配置方式都不同。
+
+PDU 的配置项包括：
+
+Config | Default | Description
+-|-|-
+Count | 1 | PDU 单元的个数。
+Name | default | PDU 的名称。
+UpSize | 0 | 上行数据包最大字节数。
+DownSize | 0 | 下行数据最大字节数。
+LenParsertype | BY_TDR | PDU 进行数据分包的模式。
+LenParser | - | PDU 分包的配置，不同的 LenParsertype 下，该配置是不同的。
+
+上述 LenParser 针对不同的分包方式有所不同，我们这里并不列出所有的分包方式下的 PDU 配置，仅列出感兴趣的。
+
+- BY_TDR，使用指定格式的 TDR 数据结构进行分包，其配置项如下：
+
+Config | Default | Description
+-|-|-
+TDR | - | TDR 结构名称，在 TDR 配置项中定义。
+Pkg | - | PDU 的名称， 方便检索。
+PkgLen | - | 数据包总长度，若配置了该项，可以忽略下面的 HeadLen 和 BodyLen 配置。
+HeadLen | - | Head 的长度信息，取自于 TDR。
+BodyLen | - | Body 的长度信息，取自于 TDR。
+
+Demo:
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+  <TDRList type="TDRList">
+    <Count>1</Count>
+    <TDRs type="TDR">
+      <Count>1</Count>
+      <Name>default</Name>
+      <Path>./sample.tdr</Name>
+    </TDRs>
+  </TDRList>
+
+  <PDUList type="PDUList">
+    <Count>1</Count>
+    <PDUs type="PDU">
+      <Name>default</Name>
+      <LenParsertype>PDULENPARSERID_BY_TDR</:enParsertype>
+      <LenParser type="PDULenParser">
+        <TDR>default</TDR>
+        <Pkg>simplepdu</Pkg>
+        <HeadLen>head.headlen</HeadLen>
+        <BodyLen>head.bodylen</BodyLen>
+      </LenParser>
+    </PDUs>
+  </PDUList>
+
+</tconnd>
+```
+
+- BY_UDP
+
+UDP 分包方式很简单，因为 UDP 本身就是分包的。
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+  <PDUList type="PDUList">
+    <Count>1</Count>
+    <PDUs type="PDU">
+      <Count>1</Count>
+      <Name>default</Name>
+      <LenParsertype>BY_UDP</LenParsertype>
+    </PDUs>
+  </PDUList>
+
+</tconnd>
+```
+
+- BY_GCP
+
+Config | Default | Description
+-|-|-
+KeyMethod | 2 | 客户端与 TConnd 协商密钥的方法。取值信息请参考后续表格。
+EncMethod | 3 | 数据加密方法。取值信息请参考后续表格。
+ReconnValidSec | 0 | 一个连接因为异常断开后，该连接在 TConnd 的连接池里存活的时间，在改时间内客户端都可以重连。0 表示不支持重连。
+CheckSequence | 0 | 是否校验客户端包的 Sequence，正常情况下 Sequence 是累加的。
+CloseAfterAuthRefreshFail | 0 | 表示鉴权续期失败或续期超时，是否断开连接。
+IsAuthRefreshOn | 0 | 是否打开 TConnd 鉴权续期。只支持微信，用于通过 Refresh Token 得到新的 Access Token。<br>开启后，TConnd 在刷新完成时，会通过 AUTH_REFRESH_NOTIFY 发送给 Game Server。
+EnableNoAuth | 0 | 表示是否运行客户端不鉴权进行连接。0 必须鉴权，1 由客户端决定，2 所有连接都不鉴权。
+IsUseRandKeyOnDhFail | 1 | 如果 DH 协商密钥失败时，是否退化成简单的随机 Key。建议保持为 1。
+IsSendAuthRefreshNotifyToClient | 0 | TConnd 续票完成后，是否通知客户端。
+IsSendAuthRefreshNotifyToSvr | 0 | TConnd 续票完成后，是否通知 Game Server。
+IsIDMappingOn | 0 | 是否打开 ID 映射功能。
+UseCompress | 0 | 是否打开压缩功能。
+CompressLimit | 0 | 开启压缩功能时，当数据超过该阈值才会进行压缩。
+EnlargeReconnScopeFlag | 0 | 是否扩大重连允许行范围，若不开启则仅 Socket 异常才能重连，若开启，则 Client 的关闭 Socket 场景也能进行重连。
+SvrConfirmTimeOut | 2 | 等待后端的 START/RELAY 响应包，当 TConnd 等待超过该时间则关闭连接。
+CloseDelaySec | 0 | TConnd 主动关闭场景下，当最后一个包下发给 Client 后，等待超过该时间会主动关闭 Socket。0 代表不等待 Client，TConnd 直接关 Socket。
+
+关于 KeyMethod 的取值：
+
+KeyMethod | Enum | Description
+-|-|-
+0 | TGCP_KEY_MAKING_NONE | 不加密
+1 | TGCP_KEY_MAKING_INAUTH | 使用认证信息携带的密钥，主要用于 QQ ST 票据
+2 | TGCP_KEY_MAKING_INSVR | TConnd 直接下发密钥
+3 | TGCP_KEY_MAKING_RAW_DH | DH 算法协商密钥
+
+关于 EncMethod 的取之：
+
+EncMethod | Enum | Description
+-|-|-
+0 | TGCP_ENCRYPT_METHOD_NONE ｜ 不加密
+3 | TGCP_ENCRYPT_METHOD_AES | AES
+4 | TGCP_ENCRYPT_METHOD_AES2 | AES2，相对于 AES 而言，其填充方式不同，建议选择 AES。
+
+## Log
 
 ## References
 
