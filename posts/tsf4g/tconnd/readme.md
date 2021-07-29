@@ -22,6 +22,9 @@
         - [Base Config](#base-config)
         - [TDR Config](#tdr-config)
         - [PDU Config](#pdu-config)
+        - [Listener Config](#listener-config)
+        - [Serializer Config](#serializer-config)
+        - [NetTrans Config](#nettrans-config)
     - [Log](#log)
     - [References](#references)
 
@@ -407,6 +410,7 @@ TConnd 配置项主要分以下几个部分：
 - Serializer 器配置项，指出如何向 Game Server 收发数据。
 - Listener 配置项，负责监听、接收连接、收发数据等。
 - NetTrans 配置项，负责将 PDU 配置项、Serializer 配置项、Listener 配置项关联起来，构建网络传输通道。
+- Auth 配置项。
 
 ### Base Config
 
@@ -550,7 +554,6 @@ UDP 分包方式很简单，因为 UDP 本身就是分包的。
   <PDUList type="PDUList">
     <Count>1</Count>
     <PDUs type="PDU">
-      <Count>1</Count>
       <Name>default</Name>
       <LenParsertype>BY_UDP</LenParsertype>
     </PDUs>
@@ -596,6 +599,157 @@ EncMethod | Enum | Description
 0 | TGCP_ENCRYPT_METHOD_NONE ｜ 不加密
 3 | TGCP_ENCRYPT_METHOD_AES | AES
 4 | TGCP_ENCRYPT_METHOD_AES2 | AES2，相对于 AES 而言，其填充方式不同，建议选择 AES。
+
+Demo:
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+  <PDUList type="PDUList">
+    <Count>1</Count>
+    <PDUs type="PDU">
+      <Count>1</Count>
+      <Name>default</Name>
+      <LenParsertype>PDULENPARSERID_BY_GCP</LenParsertype>
+      <LenParser type="PDULenParser">
+        <GCPParser type="PDULenParser">
+          <KeyMethod>2</KeyMethod>
+          <EncMethod>3</EncMethod>
+        </GCPParser>
+      </LenParser>
+    </PDUs>
+  </PDUList>
+
+</tconnd>
+```
+
+### Listener Config
+
+LisntenerList 节点下配置 Listener，每个 Listener 有以下配置：
+
+Config | Default | Description
+-|-|-
+Name | default | 监听器名称
+Url | tcp://127.0.0.1:6666 | 监听 URL
+SendBuff | 128K | 发送缓冲区大小
+RecvBuff | 128K | 接收缓冲区大小
+MaxIdle | 0 | 连接最大空闲时间，当这段时间内没有收到 Client 数据包，就主动断开客户端连接。0 代表不主动断开。
+Backlog | 128 | 监听队列的大小，设置为 128。
+NoDelay | 0 | 是否禁用 Nagle 算法，0 代表不禁用。
+
+Demo:
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+  <PDUList type="PDUList">
+    <Count>1</Count>
+    <PDUs type="PDU">
+      <Count>1</Count>
+      <Name>default</Name>
+      <LenParsertype>PDULENPARSERID_BY_GCP</LenParsertype>
+      <LenParser type="PDULenParser">
+        <GCPParser type="PDULenParser">
+          <KeyMethod>2</KeyMethod>
+          <EncMethod>3</EncMethod>
+        </GCPParser>
+      </LenParser>
+    </PDUs>
+  </PDUList>
+
+  <ListenerList type="ListenerList">
+    <Count>1</Count>
+    <Listeners type="Listener">
+      <Name>default</Name>
+      <Url>tcp://127.0.0.1:6666</Url>
+      <SendBuff>131072</SendBuff>
+      <RecvBuff>131072</RecvBuff>
+      <MaxIdle>0</MaxIdle>
+      <Backlog>128</Backlog>
+      <NoDelay>0</NoDelay>
+    </Listeners>
+  </ListenerList>
+
+</tconnd>
+```
+
+### Serializer Config
+
+Serializer 进行数据的串行化并放置 TBus 通道中，相关的配置位于 Serializers 节点下。
+
+配置信息如下所示：
+
+Config | Default | Description
+-|-|-
+HeartBeatInterval | 0 | 与 TConnd 后端的心跳间隔，单位秒，0 代表不主动发送心跳（但可以被动接受 Game Server 心跳并响应）。
+Name | default | Serializer 的名字。
+Url | - | TConnd 在 TBus 通道中的 Endpoint ID，即 TBus 通信地址。
+APIVersion | 0 | Game Server 使用的 TCONNAPI 的版本。如果 Game Server 的 TCONNAPI 版本过低，小于 TConnd 使用的版本，则需要强制填入该版本，以兼容。
+
+Demo:
+
+```xml
+<?xml version="1.0" encoding="GBK" standalone="yes" ?>
+<tconnd __version="13">
+
+  <ThreadNum>0</ThreadNum>
+  <EnableViewer>0</EnableViewer>
+  <MaxFD>10240</MaxFD>
+
+  <PDUList type="PDUList">
+    <Count>1</Count>
+    <PDUs type="PDU">
+      <Count>1</Count>
+      <Name>default</Name>
+      <LenParsertype>PDULENPARSERID_BY_GCP</LenParsertype>
+      <LenParser type="PDULenParser">
+        <GCPParser type="PDULenParser">
+          <KeyMethod>2</KeyMethod>
+          <EncMethod>3</EncMethod>
+        </GCPParser>
+      </LenParser>
+    </PDUs>
+  </PDUList>
+
+  <ListenerList type="ListenerList">
+    <Count>1</Count>
+    <Listeners type="Listener">
+      <Name>default</Name>
+      <Url>tcp://127.0.0.1:6666</Url>
+      <SendBuff>131072</SendBuff>
+      <RecvBuff>131072</RecvBuff>
+      <MaxIdle>0</MaxIdle>
+      <Backlog>128</Backlog>
+      <NoDelay>0</NoDelay>
+    </Listeners>
+  </ListenerList>
+
+  <SerializerList type="SerializerList">
+    <Count>2</Count>
+    <Serializers type="Serializer">
+      <Name>default</Name>
+      <Url>10.1.2.1<Url>
+    </Serializers>
+    <Serializers type="Serializer">
+      <Name>ListView</Name>
+      <Url>10.1.2.2<Url>
+    </Serializers>
+  </SerializerList>
+
+</tconnd>
+```
+
+### NetTrans Config
 
 ## Log
 
