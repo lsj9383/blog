@@ -589,7 +589,7 @@ KeyMethod | Enum | Description
 2 | TGCP_KEY_MAKING_INSVR | TConnd 直接下发密钥
 3 | TGCP_KEY_MAKING_RAW_DH | DH 算法协商密钥
 
-关于 EncMethod 的取之：
+关于 EncMethod 的取值：
 
 EncMethod | Enum | Description
 -|-|-
