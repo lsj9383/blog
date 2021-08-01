@@ -300,22 +300,13 @@ tgcpapi_destroy(&pHandle);
 
 TConnd 在收到客户端的断线重连请求后，不会去做登录鉴权，而是直接验证身份信息是否合法，如果合法则认为连接重连成功，给后端 Game Server 发送 Relay 请求，而对于旧连接则直接释放，不再发 STOP 包。
 
-```mermaid
-sequenceDiagram
-autonumber
+![relay](assets/relay.png)
 
-participant client as Game Client
-participant tconnd as TConnd Server
-participant server as Game Server
+**注意：**
 
-client ->> tconnd: SYN + Relay
-tconnd ->> tconnd: Relay 身份校验
-
-tconnd ->> server: RELAY 消息，并携带旧的连接 iID
-server -->> tconnd: 可以设置新的 iID，也可以复用之前的
-
-tconnd -->> client: BINGO
-```
+- TConnd Client 和 TConnd Server 连接建立时，TConnd Server 下发 BINGO 包，该包中有 Relay Identity，用于 TConnd Server 对重连的认证。
+- Relay 完成后的 BINGO 包会含有新的 Relay Identity，TConnd Client 会持有新的 Relay Identity，并且旧的 Relay Identity 不可用，
+- BINGO 中的 Relay Identity 是在 BODY 中，是密文；Relay 请求中的 Relay Identity 是在 HEAD 信息中，是明文，
 
 在 GCP 模式中客户端的断线重连请求除了身份信息外，还携带了鉴权数据。
 
