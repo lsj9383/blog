@@ -956,6 +956,15 @@ Demo:
       <LimitAction>0</LimitAction>
     </TransLimit>
   </NetTrans>
+
+  <AuthInfo>
+    <ApsAuthInfo>
+      <ServiceMode>0</ServiceMode>
+      <BusinessID>1005</BusinessID>
+      <ApsSvrCount>1</ApsSvrCount>
+      <ApsSvrUrls>tcp://127.0.0.1:8090</ApsSvrUrls>
+    </ApsAuthInfo>
+  </AuthInfo>
 </tconnd>
 ```
 
@@ -987,8 +996,17 @@ Demo:
 
 ## Log
 
+TConnd 的启动命令行参数 tlogconf 指定日志配置文件得路径，而 TConnd 的日志文件分为几种类型：
+
+运行日志 | 默认命名 | 描述
+-|-|-
+运行日志 | tconnd.log | TConnd 的运行过程中的日志，如果存在异常可以很明显从该文件中找到。<br>一般开发调试时设置为 DEBUG 级别，线上运行时设置为 ERROR 级别。
+流水日志 | tconnd_conn.log | 记录了 TConnd 的每个连接创建，结束的时间，结束原因等。每个连接占用一行记录。
+统计日志 | tconnd_rundata.log | 记录 TConnd 的内部统计信息，例如多少个客户端请求，多少连接异常断开等。
+
 ## References
 
 1. TSF4G-TCONND-开发指导手册
 1. TConnd TGCPAPI 手游开发指导手册
 1. Apollo TCONND 接入指引
+1. TSF4G TConnd 运维指导手册
