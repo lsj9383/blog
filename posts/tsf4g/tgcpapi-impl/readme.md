@@ -11,7 +11,7 @@
         - [Auth Request & Response](#auth-request--response)
         - [Bingo & Wait](#bingo--wait)
     - [Send Message](#send-message)
-    - [Peek](#peek)
+    - [Receive Message](#receive-message)
     - [Close Connection](#close-connection)
     - [Relay](#relay)
     - [Route](#route)
@@ -161,7 +161,7 @@ message TGCPBODY {
   TGCPAuthRefreshReq auth_refresh_req = 4;
   TGCPAuthRefreshNotifyBody auth_refresh_notify = 5;
   TGCPWaitBody wait = 6;
-  TGCPCStopBody csstop = 7;
+  TGCPCStopBody cstop = 7;
   TGCPSStopBody sstop = 8;
   TGCPRouteChangeBody route_change = 9;
   TGCPBingoBody bingo = 10;
@@ -380,11 +380,59 @@ message TGCPDataHead {
 
 **注意：**
 
-- 无论是 tgcpapi_send 或 tgcpapi_send_with_route，调用成功都不代表数据被立即发送成功。
+- 发送接口是非阻塞的。
+- 无论是 tgcpapi_send 或 tgcpapi_send_with_route，返回值为 TGCP_ERR_SEND_UNCOMPLETE 时表示数据仍有部分保留在缓冲区，没有发送完：
+  - 下次调用发送接口会重新发送。
+  - 调用 tgcpapi_flush 去重新发送。
+- tgcpapi_send 底层调用的是 tgcpapi_send_with_route。
 
-## Peek
+## Receive Message
+
+在连接建立后，可以接收消息了，接收消息使用 `tgcpapi_peek()` 或 `tgcpapi_recv()`。通常都会使用 `tgcpapi_peek()`。
+
+在一个正常连接中，可能接收到的消息分为以下几种：
+
+- AUTH REFRESH NOTIFY，用于通知 Game Client 刷新身份凭证。
+- ROUTE CHANGE，Game Server 主动发起路由变更。
+- DATA，Game Server 应用层发送的二进制数据。该包有 HEAD.extend 的扩展头部，主要是包含了压缩信息：
+
+  ```proto
+  // HEAD.extend
+
+  // BODY
+  ```
+
+- SSTOP，TConnd Server 关闭连接。
+
+  ```proto
+  message TGCPSStopBody {
+    uint32 code = 1;            // 错误码，结束原因
+    uint32 ex_error_code = 2;   // 额外错误原因，当 STOPREASON 为 8（鉴权失败时），可以用来判断是否是票据过期
+    uint32 tconnd_ip = 3;       // tconnd 的网络字节序 ip 整数
+    uint16 tconnd_port = 4;     // tconnd 的主机字节序 port 整数
+    string tconnd_id = 5;       // tconnd 进程唯一 id
+  }
+  ```
 
 ## Close Connection
+
+Game Client 可以通过发送一个 CSTOP 的包来关闭连接，可以使用函数：`tgcpapi_close_connection()` 或 `tgcpapi_stop_session()`。
+
+CSTOP 没有 HEAD.extend 的扩展头部，其 BODY 为：
+
+```proto
+message TGCPCStopBody {
+  uint32 reversed = 1;        // 预留字段
+}
+```
+
+CSTOP 是一个正常关闭，不会传递连接关闭原因或者错误码。
+
+**注意：**
+
+- tgcpapi_close_connection 底层是调用的 tgcpapi_stop_session 实现的
+- tgcpapi_stop_session 只是发送了 CSTOP，并没有关闭物理连接
+- tgcpapi_close_connection 出了发送 CSTOP 外，还会进行一次 tgcpapi_flush，并关闭物理连接。
 
 ## Relay
 
