@@ -359,7 +359,28 @@ message TGCPWaitBody {
 
 ## Send Message
 
-在连接建立后，就可以发送消息了，发送消息使用 `tgcpapi_send()` 接口。
+在连接建立后，就可以发送消息了，发送消息使用 `tgcpapi_send()` 或 `tgcpapi_send_with_route()` 接口。
+
+![send_message](assets/send_message.png)
+
+发送消息其实就是发送一个 DATA 包，该包存在 HEAD.extend 扩展：
+
+```proto
+message TGCPDataHead {
+  uint8 compress_flag = 1;
+  bool allow_lost = 2;
+
+  // 发送信息时的路由配置
+  uint8 route_flag = 3;
+  TGCPRouteInfo route_info = 4;
+}
+```
+
+该包的 BODY 并非是某个数据结构，而是应用层传递的二进制数据，因此对于这类包并不存在 BODY 结构。
+
+**注意：**
+
+- 无论是 tgcpapi_send 或 tgcpapi_send_with_route，调用成功都不代表数据被立即发送成功。
 
 ## Peek
 
