@@ -334,7 +334,7 @@ message TGCPBingoBody {
 }
 
 message TGCPRelay {
-  uint32 position = 1;    // 不清楚这个是什么
+  uint32 position = 1;    // 连接在 TConnd Server 的内存位置，便于重连时 TConnd Server 快速找到原来的连接
   uint8 identity = 2;     // 重连凭证
   uint64 server_id = 3;   // 登录到后端的路由信息
 }
@@ -435,5 +435,46 @@ CSTOP 是一个正常关闭，不会传递连接关闭原因或者错误码。
 - tgcpapi_close_connection 出了发送 CSTOP 外，还会进行一次 tgcpapi_flush，并关闭物理连接。
 
 ## Relay
+
+当 Game Client 和 TConnd Server 之间的 Socket 连接出现异常时，为了重建连接，但又期望避免走繁琐的 SYN/ACK，AUTH，ID MAPPER 等流程，可以使用 Relay 机制快速重连。
+
+在使用 Relay 时，建议：当且仅当 tgcpapi_recv 或 tgcpapi_peek 返回 TGCP_ERR_NETWORK_EXCEPTION 时调用。在使用 peek/recv 时，会在 IO 线程中周期调用，也就达到了周期检查 Socket 连接是否异常的目的，若异常则交给应用层 Relay 重建连接。
+
+Relay 重连有两种情况，首先最常见的是 Relay Identity 有效的情况：
+
+![relay](assets/relay.png)
+
+还有一种情况是 Relay Identity 无效的情况，会重新走密钥交换、AUTH 等流程：
+
+![relay-new-auth](assets/relay-new-auth.png)
+
+Relay 请求复用的是 SYN 包，并在其中带上了 Relay 信息，因此其 HEAD 部分为：
+
+```proto
+message TGCPSynHead {
+  // ...
+  bool has_relay_info = 7;                // 是否为重连的 SYN 包
+  TGCPRelayReqBody relay_req_info = 8;
+  // ...
+}
+
+message TGCPRelayReqBody {
+  RelayType relay_type = 1;
+  TGCPRelay relay_info = 2;
+}
+
+enum RelayType {
+  TGCP_JUMP_SERVER_RELAY = 1,         // 跨服跳转
+  TGCP_NETWORK_FAILURE_RELAY = 2,     // 断线重连
+}
+
+message TGCPRelay {
+  uint32 position = 1;    // 连接在 TConnd Server 的内存位置，便于重连时 TConnd Server 快速找到原来的连接
+  uint8 identity = 2;     // 重连凭证
+  uint64 server_id = 3;   // 登录到后端的路由信息
+}
+```
+
+Relay 请求使用 SYN 包，因此同样也没有 BODY。
 
 ## Route
