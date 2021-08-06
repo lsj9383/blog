@@ -56,7 +56,7 @@ Protoc 在解析 `.proto` 文件后，会拉起 Plugin 子进程，并通过 std
   ```sh
   # Demo 中使用 virtualenv 生成解释器，使用 Python3.6
   $ virtualenv venv --python=python3.6
-  $ source ./venv/bin/active
+  $ source ./venv/bin/activate
 
   # 安装 Python 对 Protobuf 插件编程的依赖
   $ pip install protobuf
