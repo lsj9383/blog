@@ -18,7 +18,8 @@
         - [Bazel Options](#bazel-options)
     - [Link](#link)
     - [More](#more)
-        - [TGCPAPI](#tgcpapi)
+        - [TGCPAPI Link Error](#tgcpapi-link-error)
+        - [TGCPAPI WinSocket](#tgcpapi-winsocket)
         - [sigc++](#sigc)
         - [Protobuf Plugin](#protobuf-plugin)
         - [ZLIB](#zlib)
@@ -231,7 +232,7 @@ bazelisk build <label> --cxxopt='/std:c++17' --cxxopt='/MTd'
 
 这里会阐述我在编译 C++ 代码时遇到的更匪夷所思的问题。
 
-### TGCPAPI
+### TGCPAPI Link Error
 
 TGCPAPI 是我们 TConnd 内部的一个库，即便我们使用了正确的 lib 版本进行编译，仍然会存在以下链接问题：
 
@@ -285,6 +286,44 @@ FILE _iob[] = {*stdin, *stdout, *stderr};
 extern "C" FILE* __cdecl __iob_func(void) { return _iob; }
 #  endif /* _MSC_VER>=1900 */
 #endif /* _WIN32 */
+```
+
+### TGCPAPI WinSocket
+
+TGCPAPI 的链接问题解决后，可以编译链接生成二进制文件了，当时访问 Server 建立连接总是失败：
+
+```text
+client open failed: failed to tgcpapi_start_connection with code=-6(failed to connect peer)
+```
+
+这是由于 Windows 下使用 WinSocket 需要导入 DLL 链接，否则 WinSocket 无法正确使用，导入的方式使用 WSAStartup。
+
+更多信息可以参考 [WSAStartup 函数 (winsock.h)](https://docs.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-wsastartup)。
+
+为了使用 WSAStartup，我们应该导入头文件和相关宏定义：
+
+```cpp
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#pragma comment(lib, "legacy_stdio_definitions.lib")
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "ws2_32.lib")
+#endif /* _WIN32 */
+
+int main() {
+  WSADATA wsaData;
+  WORD wVersionRequested = MAKEWORD(2, 2);
+  if ( int err = WSAStartup(wVersionRequested, &wsaData); err != 0) {
+    printf("WSAStartup failed with error: %d\n", err);
+    return 1;
+  }
+}
 ```
 
 ### sigc++
