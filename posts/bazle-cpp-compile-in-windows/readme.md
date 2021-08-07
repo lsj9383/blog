@@ -202,6 +202,10 @@ bazelisk build <label> --cxxopt='/std:c++17' --cxxopt='/MTd'
 
 更多细节可以参考 [/MD、/MT、/LD（使用运行时库）](https://docs.microsoft.com/zh-cn/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-160)。
 
+在 Visual Studio 2019 中可以通过 `运行库` 指定：
+
+![mdmt](assets/mdmt.png)
+
 ### Bazel Options
 
 这是一些我们常用的 Bazel 选项：
@@ -437,6 +441,8 @@ error LNK2001: unresolved external symbol _deflateInit2_
 该问题在 StackOverflow 上也有过讨论 [Unresolved externals despite linking in zlib.lib](https://stackoverflow.com/questions/5424549/unresolved-externals-despite-linking-in-zlib-lib)。
 
 删除预定义 zlib 头后重新编译再导入，即不会再出现这个链接错误了。
+
+![zlibzlib](assets/zlib.png)
 
 ## References
 
