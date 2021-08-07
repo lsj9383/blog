@@ -1,5 +1,6 @@
 # 博客
 
+- [Bazel C++ Compile In Windows](posts/bazle-cpp-compile-in-windows/readme.md)
 - [Talk C++](posts/talk-cpp/readme.md)
 - [TSF4G](posts/tsf4g/readme.md)
   - [TConnd](posts/tsf4g/tconnd/readme.md)
