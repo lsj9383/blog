@@ -224,6 +224,9 @@ bazelisk build <label> --cxxopt='/std:c++17' --cxxopt='/MTd'
   ARM64: --cpu=x64_arm64_windows
   ```
 
+- compilation_mode
+  - The --compilation_mode option (often shortened to -c, especially -c opt) takes an argument of fastbuild, dbg or opt, and affects various C/C++ code-generation options, such as the level of optimization and the completeness of debug tables. Bazel uses a different output directory for each different compilation mode, so you can switch between modes without needing to do a full rebuild every time.
+
 ## Link
 
 在 Windows 编程中，有很多问题可能导致 lib 库链接失败，包括但不局限于以下几种：
