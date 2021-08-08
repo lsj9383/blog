@@ -12,6 +12,10 @@
         - [Bingo & Wait](#bingo--wait)
     - [Send Message](#send-message)
     - [Receive Message](#receive-message)
+        - [Receive AUTH REFRESH NOTIFY](#receive-auth-refresh-notify)
+        - [Receive ROUTE CHANGE](#receive-route-change)
+        - [Receive DATA](#receive-data)
+        - [Receive SSTOP](#receive-sstop)
     - [Close Connection](#close-connection)
     - [Relay](#relay)
     - [Route](#route)
@@ -392,27 +396,116 @@ message TGCPDataHead {
 
 在一个正常连接中，可能接收到的消息分为以下几种：
 
-- AUTH REFRESH NOTIFY，用于通知 Game Client 刷新身份凭证。
+- AUTH REFRESH NOTIFY，用于通知 Game Client 刷新鉴权票据。
 - ROUTE CHANGE，Game Server 主动发起路由变更。
-- DATA，Game Server 应用层发送的二进制数据。该包有 HEAD.extend 的扩展头部，主要是包含了压缩信息：
-
-  ```proto
-  // HEAD.extend
-
-  // BODY
-  ```
-
+- DATA，Game Server 应用层发送的二进制数据。
+- TRANSMIT，第三方数据头部扩展。
 - SSTOP，TConnd Server 关闭连接。
 
-  ```proto
-  message TGCPSStopBody {
-    uint32 code = 1;            // 错误码，结束原因
-    uint32 ex_error_code = 2;   // 额外错误原因，当 STOPREASON 为 8（鉴权失败时），可以用来判断是否是票据过期
-    uint32 tconnd_ip = 3;       // tconnd 的网络字节序 ip 整数
-    uint16 tconnd_port = 4;     // tconnd 的主机字节序 port 整数
-    string tconnd_id = 5;       // tconnd 进程唯一 id
-  }
-  ```
+若接收到其他消息，都视作异常处理：
+
+```cpp
+tgcpapi_recv_and_decrypt_pkg(handle, &buff_length, timeout);
+
+int cmd = a_pHandle->stHeadRecved.stBase.wCommand;
+
+switch (cmd) {
+  case TGCP_CMD_DATA: break;                      // 应用数据
+  case TGCP_CMD_AUTH_REFRESH_NOTIFY: break;       // 鉴权刷新通知
+  case TGCP_CMD_ROUTE_CHANGE: break;              // TConnd 发起路由切换的命令
+  case TGCP_CMD_TRANSMIT: break;                  // 第三方数据头部扩展结构
+  case TGCP_CMD_SSTOP: break;                     // TConnd 发起断开
+  default: return TGCP_ERR_UNEXPECTED_COMMAND;
+}
+```
+
+### Receive AUTH REFRESH NOTIFY
+
+TConnd 收到 AUTH REFRESH NOTIFY 消息会去更新 Game Client 的鉴权票据，该票据只会是 WeChat 的 Access Token。
+
+该消息没有 HEAD.extend 扩展头部，其 BODY 的 Protobuf 的格式为：
+
+```proto
+message TGCPAuthRefreshNotifyBody {
+  // 认证类型
+  uint16 auth_type = 1;
+
+  // 鉴权票据
+  uint16 atk_len = 2;
+  bytes atk = 3;
+
+  // 票据过期时间
+  uint32 atk_expire_in = 4;
+}
+```
+
+有两种方式将会让 TConnd Server 向 Game Client 发送 AUTH REFRESH NOTIFY 消息：
+
+- TConnd Server 配置了自动刷新机制，此时 TConnd Server 会自动向刷新 Access Token，并通过 AUTH REFRESH NOTIFY 通知 Game Client。
+- Game Client 发送了 AUTH REFRESH REQ 主动让 TConnd Server 刷新 Access Token，并通过 AUTH REFRESH NOTIFY 通知 Game Client。
+  - 发送 AUTH REFRESH REQ 请求可以通过 `tgcpapi_refresh_acesstoken()` 接口。
+
+### Receive ROUTE CHANGE
+
+TConnd Server 后方的 Game Server 可能是一个集群，为了维持 TConnd 连接通常需要记录连接所对应的 Game Server 的信息，这就是路由信息。
+
+连接建立后，路由信息并非固定，而是可能改变的，尤其是切换地图这样的操作。这将导致从一个 Game Server 切换到另一个 Game Server，为了不必重建连接，TConnd 会给 Game Client 发送路由变更消息。
+
+ROUTE CHANGE 没有 HEAD.extend 扩展头部，其 BODY 的 Protobuf 格式为：
+
+```proto
+message TGCPRouteChangeBody {
+  uint64 server_id = 1;         // 切换后的 server_id
+}
+```
+
+Game Client 收到 ROUTE CHANGE 后并不会更新自己缓存的路由信息，而是将 server_id 记录在 Relay 时的路由信息中：
+
+```cpp
+//下次重连时到指定路由，并且后续消息包也发到新路由上
+a_pHandle->stRelay.ullServerID = a_pHandle->stBodyRecved.stRouteChange.ullServerID;
+```
+
+很明显，需要 Game Client 进行一次 Relay 以实现完整的路由切换。
+
+### Receive DATA
+
+TConnd 收到 Game Server 应用层二进制数据后，通过 DATA 消息下发至 Game Client：
+
+![receive_data](assets/receive_data.png)
+
+DATA 有 HEAD.extend 扩展头部，其 Protobuf 的格式为（其实和发送数据时的 DATA HEAD.extend 格式是一样的）：
+
+```proto
+message TGCPDataHead {
+  uint8 compress_flag = 1;
+  uint8 allow_lost = 2;
+  uint8 route_flag = 3;
+  TGCPRouteInfo route_info = 4;
+}
+```
+
+DATA 消息的 BODY 部分没有协议结构，而是解密后的应用层二进制数据（有可能被压缩过）。在 TGCPAPI 接收到 DATA 消息时（已对 BODY 解密完成），会根据 DATA 消息的 HEAD.extend 中的压缩标识进行解压。
+
+### Receive SSTOP
+
+TConnd Server 通过 SSTOP 消息通知 Game Client 关闭连接。
+
+SSTOP 没有 HEAD.extend 扩展头部，其 BODY 的 Protobuf 格式为：
+
+```proto
+message TGCPSStopBody {
+  uint32 code = 1;            // 错误码，结束原因
+  uint32 ex_error_code = 2;   // 额外错误原因，当 STOPREASON 为 8（鉴权失败时），可以用来判断是否是票据过期
+  uint32 tconnd_ip = 3;       // tconnd 的网络字节序 ip 整数
+  uint16 tconnd_port = 4;     // tconnd 的主机字节序 port 整数
+  string tconnd_id = 5;       // tconnd 进程唯一 id
+}
+```
+
+**注意：**
+
+- 收到 SSTOP 后，TGCAPI 并不会关闭物理连接，也不会设置连接为关闭状态，只是通过 `tgcpapi_peek()` 的返回值告知应用层，应用层感知到 SSTOP 后应该主动关闭连接。
 
 ## Close Connection
 
