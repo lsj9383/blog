@@ -3,27 +3,28 @@
 <!-- TOC -->
 
 - [Bazel C++ Compile In Windows](#bazel-c-compile-in-windows)
-    - [Overview](#overview)
-    - [Installation](#installation)
-        - [Bazelisk](#bazelisk)
-        - [MSVC](#msvc)
-        - [MSYS2](#msys2)
-    - [CPLUSPLUS](#cplusplus)
-        - [Predefined Macros](#predefined-macros)
-        - [Pragma Comment](#pragma-comment)
-    - [Bazel Build](#bazel-build)
-        - [MSVC Options](#msvc-options)
-            - [/std](#std)
-            - [/MD|MT](#mdmt)
-        - [Bazel Options](#bazel-options)
-    - [Link](#link)
-    - [More](#more)
-        - [TGCPAPI Link Error](#tgcpapi-link-error)
-        - [TGCPAPI WinSocket](#tgcpapi-winsocket)
-        - [sigc++](#sigc)
-        - [Protobuf Plugin](#protobuf-plugin)
-        - [ZLIB](#zlib)
-    - [References](#references)
+  - [Overview](#overview)
+  - [Installation](#installation)
+    - [Bazelisk](#bazelisk)
+    - [MSVC](#msvc)
+    - [MSYS2](#msys2)
+  - [CPLUSPLUS](#cplusplus)
+    - [Predefined Macros](#predefined-macros)
+    - [Pragma Comment](#pragma-comment)
+  - [Bazel Build](#bazel-build)
+    - [MSVC Options](#msvc-options)
+      - [/std](#std)
+      - [/MD|MT](#mdmt)
+    - [Bazel Options](#bazel-options)
+  - [Link](#link)
+  - [More](#more)
+    - [TGCPAPI Link Error](#tgcpapi-link-error)
+    - [TGCPAPI WinSocket](#tgcpapi-winsocket)
+    - [sigc++](#sigc)
+    - [Protobuf Plugin](#protobuf-plugin)
+    - [ZLIB](#zlib)
+    - [WARN LNK4099](#warn-lnk4099)
+  - [References](#references)
 
 <!-- /TOC -->
 
@@ -446,6 +447,28 @@ error LNK2001: unresolved external symbol _deflateInit2_
 删除预定义 zlib 头后重新编译再导入，即不会再出现这个链接错误了。
 
 ![zlibzlib](assets/zlib.png)
+
+### WARN LNK4099
+
+在 Windows 编译时会出现大量的 `WARN LNK4099` 告警：
+
+```text
+libtgcpapi.lib(rsa_pk1.obj) : warning LNK4099: 未找到 PDB“vc100.pdb”(使用“libtgcpapi.lib(rsa_pk1.obj)”或在“C:\users\_bazel\govxc2ry\execroot\simba\bazel-out\x64_windows-fastbuild\bin\echo\client\vc100.pdb”中寻找)；正在链接对象，如同没有调试信息一样
+
+libtgcpapi.lib(md_rand.obj) : warning LNK4099: 未找到 PDB“vc100.pdb”(使用“libtgcpapi.lib(md_rand.obj)”或在“C:\users\_bazel\govxc2ry\execroot\simba\bazel-out\x64_windows-fastbuild\bin\echo\client\vc100.pdb”中寻找)；正在链接对象，如同没有调试信息一样
+```
+
+这是因为 PDB 文件找不到所致，可参考 MSVC 文档中对此的解释：[Linker Tools Warning LNK4099](https://docs.microsoft.com/en-us/cpp/error-messages/tool-errors/linker-tools-warning-lnk4099?view=msvc-160)。
+
+在 Bazel 编译时我们如何解决这个问题呢？该问题并非是必须解决的，因为只是告警，并不影响最后的运行，但是这些告警看着很烦，也会降低链接的速度。
+
+最简单的方式是禁用这告警，在 StackOverflow 中有相关讨论：[How to deal with 3rd party c++ libraries LNK4099 Warning in VisualStudio](https://stackoverflow.com/questions/37971324/how-to-deal-with-3rd-party-c-libraries-lnk4099-warning-in-visualstudio)。
+
+Bazel 中的处理方式：
+
+```sh
+bazelisk build <label> --cxxopt='/std:c++17' --cxxopt='/MD' --linkopt='/ignore:4099'
+```
 
 ## References
 
