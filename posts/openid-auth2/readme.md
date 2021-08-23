@@ -16,16 +16,15 @@ OpenID Auth 2.0 协议规范实际上是属于过时协议，openid 基金会并
 
 Term | Description | Sample
 -|-|-
-Identifier | 标识符是 HTTP 或 HTTPS 的 URI |
+Identifier | 标识符是 HTTP 或 HTTPS 的 URI | -
 User-Agent | 终端用户的网页浏览器 | Chrome/FireFox/IE
 Relying Party(RP) | 希望认证终端用户身份的网页应用 | [饥荒网页应用](https://accounts.klei.com/login)
 OpenID Provider(OP) | OpenID Auth Server，RP 使用 OP 对用户身份进行认证 | Steam Platform
-OP Endpoint URL | 接受 OpenID 身份验证协议消息的 URL，该值必须是绝对的 HTTP 或 HTTPS URL |
-OP Identifier | OpenID Provider 的标识符 | http://steamcommunity.com/openid
-User-Supplied Identifier | | http://steamcommunity.com/openid/id/76561198268973239
-Claimed Identifier | |
+OP Endpoint URL | 接受 OpenID 身份验证协议消息的 URL，该值必须是绝对的 HTTP 或 HTTPS URL | https://steamcommunity.com/openid/login
+OP Identifier | OpenID Provider 的标识符 | https://steamcommunity.com/openid
+Claimed Identifier | 用户声称其拥有的 Identifier，OpenID Auth 2.0 规范的目标就是为了验证 Claimed Identifier | https://steamcommunity.com/openid/id/76561198268973239
+User-Supplied Identifier | 可以是用户的 Claimed Identifier 或者 OP Identifier | https://steamcommunity.com/openid/id/76561198268973239 or <br> https://steamcommunity.com/openid
 OP-Local Identifier | | -
-
 
 ### Flow
 
