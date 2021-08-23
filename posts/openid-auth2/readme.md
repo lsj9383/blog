@@ -45,4 +45,117 @@ OP-Local Identifier | | -
 
 ![flow](assets/flow.png)
 
-## Initiation
+## Data Formats
+
+这里对 OpenID Auth2.0 的数据形式进行阐述。这是一个示例：
+
+- Protocol Messages
+
+  ```text
+  Key     | Value
+  --------+---------------------------
+  mode    | error
+  error   | This is an example message
+  ```
+
+- Key-Value Form encoded:
+
+  ```text
+  mode:error
+  error:This is an example message
+  ```
+
+- HTTP Encoding(POST)
+
+  ```text
+  openid.mode=error&openid.error=This%20is%20an%20example%20message
+  ```
+
+### Protocol Messages
+
+OpenID Authentication Message 是一个映射，Key 和 Value 均为纯文本，并使用完整的 Unicode 字符集，当需要对其进行编码时，**必须**使用 UTF-8 编码。
+
+本文中，除非特别声明为 optional，否则所有的参数都是必须的。
+
+**注意：**
+
+- Message 不能包含同名的 Key。
+
+### Key-Value Form Encoding
+
+Key-Value 形式的消息是一系列行。
+
+每行以一个 Key 开始，后跟一个冒号，以及与 Key 相关的 Value。
+
+该行由单个换行符终止（\n）。 Key 和 Value 不得包含换行符，Key 也不得包含冒号。
+
+### HTTP Encoding
+
+OpenID Auth2.0 的请求消息是有特殊要求的：
+
+- 所有 Key 都必须以 "openid." 为前缀。此前缀可防止干扰与 OpenID 身份验证消息一起传递的其他参数。
+- 当消息作为 POST 发送时，OpenID 参数必须只在 POST 正文中发送和提取。
+- 作为 HTTP 请求（GET 或 POST）发送的所有消息必须包含以下字段：
+
+Parameters | Value | Description
+-|-|-
+openid.ns | http://specs.openid.net/auth/2.0 | 表示使用 OpenID Auth2.0 请求。
+openid.mode | Specified individually for each message type. | 允许接收者知道它正在处理什么类型的消息。如果不存在，处理方应该假设请求不是一个 OpenID 消息。
+
+这个 HTTP 请求方式适用于 User-Agent 到 OP 和 RP，也适用于 RP 到 OP。
+
+### Integer Representations
+
+OpenID Auth2.0 中整数也是有特殊要求的，例如：
+
+```text
+Base 10 number | btwoc string representation
+---------------+----------------------------
+0              | "\x00"
+127            | "\x7F"
+128            | "\x00\x80"
+255            | "\x00\xFF"
+32768          | "\x00\x80\x00"
+```
+
+## Communication Types
+
+OpenID Auth2.0 中有以下几种通信方式：
+
+- 直接通信，直接使用 HTTP 请求。
+- 间接通信，通过重定向间接请求。
+
+### Direct Request
+
+直接请求必须使用 HTTP POST。
+
+直接请求的响应由 Key-Value 组成，且 `Content-Type` 应该是：`text/plain`。
+
+所有的消息中必须包含以下参数：
+
+Parameters | Value | Description
+-|-|-
+ns | http://specs.openid.net/auth/2.0 | 表示使用 OpenID Auth2.0 请求。
+
+若是一个失败的响应，则响应状态码为 400，且包含以下参数：
+
+Parameters | Required | Description
+-|-|-
+ns | Y | http://specs.openid.net/auth/2.0，表示使用 OpenID Auth2.0 请求。
+error | Y | 易读的错误消息。
+contact | N | 服务器管理员的联系地址。
+reference | N | 一个令牌，便于服务器管理员定位问题。
+
+### Indirect Request
+
+若是一个失败的响应，OP 必须将用户代理重定向到 "openid.return_to" 的 URL，并提供以下参数：
+
+Parameters | Required | Description
+-|-|-
+openid.ns | Y | http://specs.openid.net/auth/2.0，表示使用 OpenID Auth2.0 请求。
+openid.mode | Y | 固定为 "error"。
+openid.error | Y | 易读的错误消息。
+openid.contact | N | 服务器管理员的联系地址。
+openid.reference | N | 一个令牌，便于服务器管理员定位问题。
+
+openid.return_to 不存在或其值不是有效的 URL，则服务器应该向 End User 返回一个响应，指示错误并且它不能继续。
