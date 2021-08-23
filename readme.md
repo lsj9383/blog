@@ -1,5 +1,6 @@
 # 博客
 
+- [OpenID Authentication 2.0](posts/openid-auth2/readme.md)
 - [OAuth 2.0 Threat Model and Security Considerations](posts/oauth-threat/readme.md)
 - [Bazel C++ Compile In Windows](posts/bazle-cpp-compile-in-windows/readme.md)
 - [Talk C++](posts/talk-cpp/readme.md)
