@@ -282,3 +282,25 @@ https://steamcommunity.com/openid/login
 OP 在为用户提供登录页时，需要将 `openid.realm` 的值展示给用户，让用户知道现在请求认证身份的 RP 是谁。
 
 ![realm](assets/realm.png)
+
+## Responding to Authentication Requests
+
+当 OP 正确识别用户将会返回 Positive Assertions，包含了以下参数：
+
+Parameters | Required | Description
+-|:-:|-
+openid.ns | Y | 固定为 "http://specs.openid.net/auth/2.0"。
+openid.mode | Y | 固定为 "id_res"。
+openid.op_endpoint | Y | The OP Endpoint URL.
+openid.claimed_id | N | The Claimed Identifier.
+openid.identity | N | The OP-Local Identifier.
+openid.return_to | N | 取值为请求中的 `openid.return_to`。
+openid.response_nonce | Y | 对于此特定的成功身份验证响应必须是唯一的。
+openid.invalidate_handle | N | 如果 RP 发送了一个无效的关联 Handle，则包含在此处。无效的原因可能是不存在，或者过期。
+openid.assoc_handle | Y | 用于签署该断言的关联句柄。
+openid.signed | Y |
+openid.sig | Y | 签名的 Base 64 编码。
+
+这是 Steam OpenID Auth2.0 向饥荒返回的断言响应：
+
+![openid-auth2-response](assets/openid-auth2-response.png)
