@@ -1,5 +1,32 @@
 # OpenID Authentication 2.0
 
+<!-- TOC -->
+
+- [OpenID Authentication 2.0](#openid-authentication-20)
+    - [Overview](#overview)
+        - [Terminology](#terminology)
+        - [Flow](#flow)
+    - [Initiation and Discovery](#initiation-and-discovery)
+        - [Initiation](#initiation)
+        - [Normalization](#normalization)
+        - [Discovery](#discovery)
+    - [Establishing Associations](#establishing-associations)
+        - [Association Session Request](#association-session-request)
+        - [Association Session Response](#association-session-response)
+    - [Requesting Authentication](#requesting-authentication)
+        - [Realms](#realms)
+    - [Responding to Authentication Requests](#responding-to-authentication-requests)
+    - [Appendix: Data Formats](#appendix-data-formats)
+        - [Protocol Messages](#protocol-messages)
+        - [Key-Value Form Encoding](#key-value-form-encoding)
+        - [HTTP Encoding](#http-encoding)
+        - [Integer Representations](#integer-representations)
+    - [Appendix: Communication Types](#appendix-communication-types)
+        - [Direct Request](#direct-request)
+        - [Indirect Request](#indirect-request)
+
+<!-- /TOC -->
+
 ## Overview
 
 OpenID Auth 2.0 是一个用户身份认证协议，在互联网早期有不少平台会使用该协议做第三方登录，例如 Steam：[基于网页浏览器的 OpenID 验证](https://partner.steamgames.com/doc/features/auth#website)。
