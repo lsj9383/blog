@@ -21,6 +21,7 @@ Google 通过 Abseil 开发社区公布这些 TotW，本文的即是对这些 To
 ## C++ Tips of Week 翻译目录
 
 - [TotW #1: string_view](totw1/readme.md)
+- [TotW #3: String Concatenation and operator+ vs. StrCat()](totw3/readme.md)
 - [TotW #5: Disappearing Act](totw5/readme.md)
 - [TotW #10: Splitting Strings, not Hairs](totw10/readme.md)
 - [TotW #11: Return Policy](totw11/readme.md)
