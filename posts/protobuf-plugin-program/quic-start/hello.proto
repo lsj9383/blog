@@ -1,0 +1,19 @@
+// hello.proto
+
+syntax = "proto3";
+
+service Foo {
+  rpc Bar(FooRequest) returns(FooResponse);
+}
+
+message FooRequest {
+  string content = 1;
+}
+
+message FooResponse {
+  string content = 1;
+}
+
+message Hello {
+  string name = 1;
+}
