@@ -85,9 +85,6 @@ SomeBigObject obj = SomeBigObject::SomeBigObjectFactory(...);
   ```cpp
   // RVO won’t happen here; prints message "Expensive assignment ...":
   obj = SomeBigObject::SomeBigObjectFactory(s2);
-
-  // 这是因为 RVO 的本质还是栈空间数据的复用。如果使用一个新的对象，不能直接将栈空间复用了。
-  // 对于这种情况，就会执行赋值操作 operator()。
   ```
 
 - 被调用的函数如果使用了多个不同的对象作为返回值，也无法使用 RVO 优化：
