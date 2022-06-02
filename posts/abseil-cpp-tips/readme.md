@@ -35,6 +35,8 @@ Google 通过 Abseil 开发社区公布这些 TotW，本文的即是对这些 To
 - [TotW #24: Copies Abbrv](totw24/readme.md)
 - [TotW #36: New Join API](totw36/readme.md)
 - [TotW #42: Prefer Factory Functions to Initializer Methods](totw42/readme.md)
+- [TotW #45: Avoid Flags, Especially in Library Code](totw45/readme.md)
+- [TotW #49: Argument-Dependent Lookup](totw49/readme.md)
 
 ## 参考文献
 

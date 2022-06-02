@@ -188,3 +188,7 @@ int main(void) {
   return 0;
 }
 ```
+
+## 附录三、参考文献
+
+1. [链接、装载与库——进程的栈](https://kongkongk.github.io/2020/06/29/process-stack/)
