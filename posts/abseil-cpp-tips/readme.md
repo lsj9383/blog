@@ -38,6 +38,7 @@ Google 通过 Abseil 开发社区公布这些 TotW，本文的即是对这些 To
 - [TotW #45: Avoid Flags, Especially in Library Code](totw45/readme.md)
 - [TotW #49: Argument-Dependent Lookup](totw49/readme.md)
 - [TotW #55: Name Counting and unique_ptr](totw55/readme.md)
+- [TotW #61: Default Member Initializers](totw61/readme.md)
 
 ## 参考文献
 
