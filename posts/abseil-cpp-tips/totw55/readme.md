@@ -1,8 +1,15 @@
 # Name Counting and unique_ptr
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
 
-由于对 `std::unique_ptr` 的行为要求，我们需要确保任何保存在 `std::unique_ptr` 中的值，只有一个名称。
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/55)
+
+
+
+通俗的说，值的**名称(name)**是任何值类型的变量，它保存一个特定的数据值（对于规范而言，如果我们讨论**名称**，我们本质上是在讨论左值）。
+
+由于对 `std::unique_ptr` 特定行为的要求，我们需要确保任何通过 `std::unique_ptr` 保存的值，只有一个名称。
 
 需要注意的是，C++ 委员会为 `std::unique_ptr` 选择了一个非常恰当的名称：任何存储在 `std::unique_ptr` 中的非空指针值，在任意时刻都只能出现在一个 std::unique_ptr 中，同时标准库设计时也会突出这种特性。
 
@@ -10,7 +17,8 @@ Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
 
 > Many common problems compiling code that uses std::unique_ptr can be resolved by learning to recognize how to count the names for a std::unique_ptr: one is OK, but multiple names for the same pointer value are not.
 
-让我们为这些名字计数：在每一行计算在该点活动的名称数量，这些名称引用包含相同指针的 `std::unique_ptr`。 如果您发现同一指针值具有多个名称的任何行，那就是错误！
+
+如果你发现同一指针，具有多个名称去引用（即通过 `std::unique_ptr` 去引用），这种情况则是错误的。
 
 ```cpp
 std::unique_ptr<Foo> NewFoo() {

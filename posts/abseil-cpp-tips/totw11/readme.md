@@ -1,5 +1,10 @@
 # Return Policy
 
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/11)
+
 很多旧的 C++ 代码库对返回值时的复制对象存在畏惧。幸运的是，我们能够 “复制” 而又不是真正的拷贝对象，这种优化技术被称为返回值优化（[RVO](https://en.wikipedia.org/wiki/Return_value_optimization)）。
 
 RVO 基本上是所有 C++ 编译器都支持的特性。

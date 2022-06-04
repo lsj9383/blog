@@ -1,6 +1,9 @@
 # String Concatenation and operator+ vs. StrCat()
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/3)
 
 不少人对 “不要使用字符串拼接运算符，它的效率不高” 感到困惑，怎么可能 **std::string::operator+** 的效率不高呢？
 

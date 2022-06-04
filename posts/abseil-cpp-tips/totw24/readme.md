@@ -1,6 +1,9 @@
 # Copies, Abbrv
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/24)
 
 ## 一个名称，没有拷贝；两个名称，两个副本
 

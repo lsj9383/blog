@@ -1,6 +1,9 @@
 # string_view
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/1)
 
 ## string_view 是什么，为什么你需要使用它
 

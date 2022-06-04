@@ -1,6 +1,9 @@
 # Argument-Dependent Lookup
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/49)
 
 ## 概览
 

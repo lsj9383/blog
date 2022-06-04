@@ -1,6 +1,9 @@
 # Disappearing Act
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/5)
 
 有些时候，为了正确使用 C++ 库，你需要同时理解库和语言。那么下面的代码有什么问题？
 

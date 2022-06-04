@@ -1,6 +1,9 @@
 # Splitting Strings, not Hairs
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/10)
 
 将字符串拆分为子字符串是任何通用编程语言中的常见任务，C++ 也不例外。
 

@@ -1,6 +1,9 @@
 # Prefer Factory Functions to Initializer Methods
 
-Quicklink: [Abseil：C++ Tips of the Week](../readme.md)
+Quicklink:
+
+- [目录](../readme.md)
+- [原文链接](https://abseil.io/tips/42)
 
 在不使用 C++ 异常机制的环境中（Google 的 C++ 编程通常很少使用异常机制，可以参考 [Exceptions](https://google.github.io/styleguide/cppguide.html#Exceptions)），C++ 构造函数必须成功，因为他们没有办法向外暴露任何失败。
 
