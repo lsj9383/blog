@@ -3,7 +3,7 @@
 Quicklink:
 
 - [目录](../readme.md)
-- [原文链接](https://abseil.io/tips/55)
+- [原文链接](https://abseil.io/tips/65)
 
 C++11 为标准容器（例如 `std::vector<>`）增加了新的插入方式：**emplace()** 方法族。
 

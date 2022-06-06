@@ -3,7 +3,7 @@
 Quicklink:
 
 - [目录](../readme.md)
-- [原文链接](https://abseil.io/tips/55)
+- [原文链接](https://abseil.io/tips/61)
 
 ## 声明默认成员初始化
 

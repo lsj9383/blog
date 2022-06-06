@@ -41,6 +41,7 @@ Google 通过 Abseil 开发社区公布这些 TotW，本文的即是对这些 To
 - [TotW #61: Default Member Initializers](totw61/readme.md)
 - [TotW #64: Raw String Literals](totw64/readme.md)
 - [TotW #65: Putting Things in their Place](totw65/readme.md)
+- [TotW #74: Delegating and Inheriting Constructors](totw74/readme.md)
 
 ## 参考文献
 
