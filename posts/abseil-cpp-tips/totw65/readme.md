@@ -103,3 +103,74 @@ v1.emplace(v1.begin(), new Foo(1, 2));
 ## 总结
 
 > We’ve used vector as an example in this Tip, but emplace methods are also available for maps, lists and other STL containers. When combined with unique_ptr, emplace allows for good encapsulation and makes the ownership semantics of heap-allocated objects clear in ways that weren’t possible before. Hopefully this has given you a feel for the power of the new emplace family of container methods, and a desire to use them where appropriate in your own code.
+
+## 附录
+
+```cpp
+#include <vector>
+#include <string>
+#include <iostream>
+
+class Foo {
+ public:
+  Foo(int x_, int y_) {
+    std::cout << "Foo(x, y)" << std::endl;
+    x = x_;
+    y = y_;
+  }
+
+  Foo(const Foo& f) {
+    std::cout << "Foo(const Foo& f)" << std::endl;
+    x = f.x;
+    y = f.y;
+  }
+
+  Foo(Foo&& f) {
+    std::cout << "Foo(Foo&& f)" << std::endl;
+    x = f.x;
+    y = f.y;
+  }
+
+ public:
+  int x;
+  int y;
+};
+
+void test1() {
+  std::cout << "=============== test1 ===============" << std::endl;
+  std::vector<Foo> v;
+  Foo f(1, 2);
+  v.push_back(f);
+}
+
+void test2() {
+  std::cout << "=============== test2 ===============" << std::endl;
+  std::vector<Foo> v;
+  v.push_back(Foo(1, 2));
+}
+
+void test3() {
+  std::cout << "=============== test3 ===============" << std::endl;
+  std::vector<Foo> v;
+  v.emplace_back(1, 2);
+}
+
+int main(int argc, char **argv) {  
+  test1();
+  test2();
+  test3();
+}
+```
+
+编译后的输出为：
+
+```sh
+=============== test1 ===============
+Foo(x, y)
+Foo(const Foo& f)
+=============== test2 ===============
+Foo(x, y)
+Foo(Foo&& f)
+=============== test3 ===============
+Foo(x, y)
+```
