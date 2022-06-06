@@ -3,9 +3,9 @@
 <!-- TOC -->
 
 - [Abseil：C++ Tips of the Week 翻译](#abseilc-tips-of-the-week-翻译)
-  - [概览](#概览)
-  - [C++ Tips of Week 翻译目录](#c-tips-of-week-翻译目录)
-  - [参考文献](#参考文献)
+    - [概览](#概览)
+    - [C++ Tips of Week 翻译目录](#c-tips-of-week-翻译目录)
+    - [参考文献](#参考文献)
 
 <!-- /TOC -->
 
@@ -39,6 +39,8 @@ Google 通过 Abseil 开发社区公布这些 TotW，本文的即是对这些 To
 - [TotW #49: Argument-Dependent Lookup](totw49/readme.md)
 - [TotW #55: Name Counting and unique_ptr](totw55/readme.md)
 - [TotW #61: Default Member Initializers](totw61/readme.md)
+- [TotW #64: Raw String Literals](totw64/readme.md)
+- [TotW #65: Putting Things in their Place](totw65/readme.md)
 
 ## 参考文献
 
