@@ -43,6 +43,7 @@ Google 通过 Abseil 开发社区公布这些 TotW，本文的即是对这些 To
 - [TotW #65: Putting Things in their Place](totw65/readme.md)
 - [TotW #74: Delegating and Inheriting Constructors](totw74/readme.md)
 - [TotW #77: Temporaries, Moves, and Copies](totw77/readme.md)
+- [TotW #86: Enumerating with Class](totw86/readme.md)
 - [TotW #88: Initialization: =, (), and {}](totw88/readme.md)
 
 ## 参考文献
