@@ -5,6 +5,7 @@
   - [C4 Model](posts/se/c4model/readme.md)
   - [软件方法 - 业务建模和需求](posts/se/software-methods/readme.md)
   - [软件建模与设计 - UML、用例、模式和软件体系结构](posts/se/software-modeling-design/readme.md)
+  - [实现领域驱动设计](posts/se/ddd-impl/readme.md)
   - [RUP: 4+1](posts/se/rup41/readme.md)
   - [架构视图：5+1 视图](posts/se/view51/readme.md)
 - [发票](posts/invoice/readme.md)
