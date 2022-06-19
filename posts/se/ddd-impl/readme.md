@@ -29,3 +29,4 @@
 ## 索引
 
 1. [架构](arch/readme.md)
+1. [领域事件](domain-event/readme.md)
