@@ -37,4 +37,6 @@
 ## 索引
 
 1. [架构](arch/readme.md)
+1. [实体](entity/readme.md)
+1. [值对象](valueobject/readme.md)
 1. [领域事件](domain-event/readme.md)
