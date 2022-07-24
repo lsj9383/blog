@@ -1,5 +1,7 @@
 # 博客
 
+- [Google 安全白皮书](posts/google-secure/readme.md)
+- [安全理念和方法论](posts/secure-consider/readme.md)
 - [Google Code Review](posts/google-cr/readme.md)
 - [Abseil: C++ Tips of the Week 翻译](posts/abseil-cpp-tips/readme.md)
 - [软件工程](posts/se/readme.md)
