@@ -194,3 +194,4 @@ Google 的应急响应团队实施365天24小时的全天候待命。同时，Go
 ## 参考文献
 
 1. [Google 基础设施安全设计概述翻译和导读](https://security.tencent.com/index.php/blog/msg/114)
+1. [从 Google 白皮书看企业安全最佳实践](https://tech.meituan.com/2017/04/07/google-security-ayazero.html)
