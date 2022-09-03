@@ -1,5 +1,6 @@
 # 博客
 
+- [TLS 1.2](posts/tls-12/readme.md)
 - [API 设计](posts/api-design/readme.md)
 - [Google 安全白皮书](posts/google-secure/readme.md)
 - [安全理念和方法论](posts/secure-consider/readme.md)
@@ -12,7 +13,7 @@
   - [实现领域驱动设计](posts/se/ddd-impl/readme.md)
   - [RUP: 4+1](posts/se/rup41/readme.md)
   - [架构视图：5+1 视图](posts/se/view51/readme.md)
-  - [API 设计](posts/se/api-design/readme.md)
+  - [REST](posts/se/rest/readme.md)
 - [发票](posts/invoice/readme.md)
   - [发票基础业务知识](posts/invoice/basic/readme.md)
   - [增值税防伪税控系统](posts/invoice/system/readme.md)
