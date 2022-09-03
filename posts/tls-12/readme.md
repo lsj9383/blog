@@ -1519,6 +1519,7 @@ CipherSuite TLS_DH_anon_WITH_AES_256_CBC_SHA256   = { 0x00,0x6D };
 
 ## 附录：参考文献
 
+1. [TLS 1.2(RFC5246)](https://www.rfc-editor.org/rfc/rfc5246.html)
 1. [Transport Layer Security (TLS) Extensions: Extension Definitions(RFC 6066)](https://www.rfc-editor.org/rfc/rfc6066)
 1. [HTTPS 温故知新（一） —— 开篇](https://halfrost.com/https-begin/)
 1. [HTTPS 温故知新（二） —— TLS 记录层协议](https://halfrost.com/https_record_layer/)
