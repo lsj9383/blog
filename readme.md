@@ -1,6 +1,7 @@
 # 博客
 
 - [TLS 1.2](posts/tls-12/readme.md)
+- [HTTP 签名标准](posts/http-message-signature/readme.md)
 - [API 设计](posts/api-design/readme.md)
 - [Google 安全白皮书](posts/google-secure/readme.md)
 - [安全理念和方法论](posts/secure-consider/readme.md)
