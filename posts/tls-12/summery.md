@@ -326,7 +326,20 @@ struct {
 
 ### Record 压缩
 
-如果安全参数中已经确定并指定了压缩算法，则会对 `TLSPlaintext` 进行压缩，并转换成 `TLSCompressed`
+如果安全参数中已经确定并指定了压缩算法，则会对 `TLSPlaintext` 进行压缩，并转换成 `TLSCompressed`：
+
+```txt
+struct {
+    ContentType type;                               /* 和 TLSPlaintext.type 相同 */
+    ProtocolVersion version;                        /* 和 TLSPlaintext.version 相同*/
+    uint16 length;                                  /* 下面 fragment 的长度（以字节为单位），长度不得超过 2^14 + 1024 */
+    opaque fragment[TLSCompressed.length];          /* TLSPlaintext.fragment 压缩后的数据 */
+} TLSCompressed;
+```
+
+**注意：**
+
+- 如果没有指定压缩算法，则不会进行压缩，`TLSPlaintext` 和 `TLSCompressed` 两个结构体的数据是一致的。
 
 ### Record 保护
 
@@ -334,6 +347,91 @@ Record 的保护主要是两方面：
 
 - 目标：数据完整性。手段：使用 MAC 对称密钥进行数字签名。
 - 目标：数据机要性。手段：使用读写对称密钥进行负载加密。
+
+struct {
+    ContentType type;                                       /* 和 TLSCompressed.type 相同 */
+    ProtocolVersion version;                                /* 和 TLSCompressed.version 相同 */
+    uint16 length;                                          /* TLSCiphertext.fragment 的长度（以字节为单位），长度不得超过 2^14 + 2048 */
+
+    /* 不同的加密类型，会使用不同的密文数据 */
+    select (SecurityParameters.cipher_type) {
+        case stream: GenericStreamCipher;
+        case block:  GenericBlockCipher;
+        case aead:   GenericAEADCipher;
+    } fragment;                                             /* TLSCompressed.fragment 的加密形式，其中带有 MAC */
+} TLSCiphertext;
+
+**注意：**
+
+- 这里也可以看出来，头部数据其实是没有加密的。 
+
+来看一下三种不同加密类型的数据结构：
+
+- 流加密算法（Stream Cipher），例如异或加密、RC4：
+
+  ```txt
+  stream-ciphered struct {
+      opaque content[TLSCompressed.length];               /* 将 TLSCompressed.fragment 加密得到 */
+      opaque MAC[SecurityParameters.mac_length];          /* 消息的 MAC 值 */
+  } GenericStreamCipher;
+
+  /************** MAC 的计算 ******************
+  MAC(MAC_write_key, seq_num +
+                     TLSCompressed.type +
+                     TLSCompressed.version +
+                     TLSCompressed.length +
+                     TLSCompressed.fragment);
+  该 Record 的 sequence number，每次建立连接时都会搞一个，和连接状态绑定，不同连接状态直接独立。
+  很明显，MAC 有对头部进行完整性保护。
+  ********************************/
+  ```
+
+- 块加密（CBC Block Cipher），例如 AES 算法：
+
+  ```txt
+  struct {
+      opaque IV[SecurityParameters.record_iv_length];
+
+      block-ciphered struct {
+          /* 密文和 MAC，并且对于 MAC 的计算方式和流加密的一致 */
+          opaque content[TLSCompressed.length];
+          opaque MAC[SecurityParameters.mac_length];
+
+          /* 块加密需要是块的整数倍，所以会有填充部分，这里指出填充的内容和长度 */
+          uint8 padding[GenericBlockCipher.padding_length];
+          uint8 padding_length;
+      };
+  } GenericBlockCipher;
+  ```
+
+- aead 类的加密算法，例如 AES_GCM：
+
+  ```txt
+  /* 这类加密算法中本身已经包含了 MAC 的计算，所以在这里的结构体中不会包含 MAC */
+  struct {
+      opaque nonce_explicit[SecurityParameters.record_iv_length];
+      aead-ciphered struct {
+          opaque content[TLSCompressed.length];
+      };
+  } GenericAEADCipher;
+  
+  /*
+  AEAD 算法一般如下所示：
+  
+  AEADEncrypted = AEAD-Encrypt(write_key, nonce, plaintext, additional_data)
+  
+  这里是需要一个附加数据的，这个附加数据就是用来构造 MAC 的（指出除了密文本身外，需要保护哪些数据的一致性）
+  
+  在 TLS Record Layer 中会进行如下运算：
+  
+  additional_data = seq_num +
+                    TLSCompressed.type +
+                    TLSCompressed.version +
+                    TLSCompressed.length;
+  
+  其实基本和流加密的差不多，只是没加上 fragment，因为这是 AEAD 加密算法自己加的。
+  */
+  ```
 
 ## Handshake Protocol
 
