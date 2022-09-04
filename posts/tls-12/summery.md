@@ -348,6 +348,7 @@ Record 的保护主要是两方面：
 - 目标：数据完整性。手段：使用 MAC 对称密钥进行数字签名。
 - 目标：数据机要性。手段：使用读写对称密钥进行负载加密。
 
+```txt
 struct {
     ContentType type;                                       /* 和 TLSCompressed.type 相同 */
     ProtocolVersion version;                                /* 和 TLSCompressed.version 相同 */
@@ -360,6 +361,7 @@ struct {
         case aead:   GenericAEADCipher;
     } fragment;                                             /* TLSCompressed.fragment 的加密形式，其中带有 MAC */
 } TLSCiphertext;
+```
 
 **注意：**
 
