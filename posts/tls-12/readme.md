@@ -924,13 +924,31 @@ enum {
 - 如果协商的密钥交换算法是 (DHE_DSS, DH_DSS) 之一，默认算法是 {sha1,dsa}（认为客户端发送了此扩展）。
 - 如果协商的密钥交换算法是 (ECDH_ECDSA, ECDHE_ECDSA) 之一，默认算法是 {sha1,ecdsa}（认为客户端发送了此扩展）。
 
-执行会话恢复时，该扩展不包含在 Server Hello 中，服务器忽略 Client Hello 中的扩展（如果存在）。
+**注意：**
+
+- Server 不能返回此扩展，只能被动接受 client 的该扩展。
+
+为什么呢？这是因为所有的签名数据中，就会带上签名方法：
+
+```txt
+/* 所有需要签名的数据都满足如下格式 */
+struct {
+    SignatureAndHashAlgorithm algorithm;
+    opaque signature<0..2^16-1>;
+} DigitallySigned;
+
+struct {
+    HashAlgorithm hash;                     /* 该字段表示可以使用的哈希算法。 */
+    SignatureAlgorithm signature;           /* 该字段表示可以使用的签名算法。 */
+} SignatureAndHashAlgorithm;
+```
 
 ### 消息：Server Certificate
 
 消息发送时机：
 
 - 此消息始终跟在 Server Hello 之后
+- 如果协商出的密钥套件是 DH_anon 则不用发送该消息，因为这种密钥交换算法是`匿名`的。最大的问题是可能导致中间人攻击。
 
 消息的含义：
 

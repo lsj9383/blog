@@ -437,9 +437,696 @@ struct {
 
 ## Handshake Protocol
 
+完整的握手协议流程：
+
+```txt
+  Client                                               Server
+  
+  ClientHello                  -------->
+                                                  ServerHello
+                                                  Certificate*
+                                            ServerKeyExchange*
+                                           CertificateRequest*
+                              <--------       ServerHelloDone
+  Certificate*
+  ClientKeyExchange
+  CertificateVerify*
+  [ChangeCipherSpec]
+  Finished                     -------->
+                                            [ChangeCipherSpec]
+                               <--------             Finished
+  Application Data             <------->     Application Data
+```
+
+消息介绍：
+
+消息 | 发送方 | 必有 | 发送条件 | 描述
+-|-|-|-|-
+ClientHello | Client | Y | - | 用以告诉 Server 自己支持的所有密钥交换方法，所有安全参数，以及所有签名算法。
+ServerHello | Server | Y | - | Server 将自己选择的密钥交换方法、安全参数和签名算法告诉客户端。
+Certificate* | Server | Y | 密钥交换算法需要使用证书进行认证的，Server 就必须发送一个 Certificate | 发送 Server 的证书链（包括自己的证书，但不包括根证书）。
+ServerKeyExchange* | Server | N | 如果密钥交换算法不是 RSA、DH_DSS、DH_RSA 则需要发送该消息 | 发送密钥交换算法中，Server 需要告诉客户端的消息。例如 DH 算法中，Server 要告诉客户端素数。
+CertificateRequest* | Server | N | 如果 Server 希望验证 Client，那么会发送该消息 | 告诉客户端自己需要什么样的客户端证书，以及签名方式。
+ServerHelloDone | Server | Y | - | 表明 Server 发送的消息结束，后续 Server 等待接收客户端信息。
+Certificate* | Client | N | Server 发送了 CertificateRequest 后需要发送该消息 | 发送客户端证书。即便客户端没有符合条件的证书，也需要发送该消息，但证书数组为空。
+ClientKeyExchange | Client | Y | - | 客户端发送密钥交换算法中客户端需要提供的信息。RSA 和 DH 算法发送的消息是不同的。例如 RSA 发送的是服务器证书公钥加密的随机数。
+CertificateVerify* | Client | N | 客户端发送了 Certificate 消息，则还需要发送该验证消息 | 客户端自己私钥对一个数据的签名，该数据 Server 端也有。Server 会用客户端证书公钥验签。
+Finished | Client & Server | Y | - | 客户端最后发送 Finished 消息，该消息已经被密钥加密通信。Server 端也会回一个。目的是确认双方的密钥真的达成一致了（能够解密对方的，就达成一致了，从 Record Layer 的密钥可以看出，两方加密使用的密钥是不一样的）。
+Application Data | Client & Server | Y | - | 实际需要保护的应用层数据。
+
+**注意：**
+
+- ClientHello 和 ServerHello 中提到的签名算法，指的是握手过程中用证书私钥签名的算法，并非 Record Layer 用的。是用 Extensions 中的 signature_algorithm 扩展来支持的。
+- 这里有一个用中括号 `[]` 包裹起来的 `[ChangeCipherSpec]`，这代表该消息并非是属于 Handshake Protocol，而是 ChangeCipherSpec Protocol。
+- `[ChangeCipherSpec]` 该消息是必须发送的，只是穿插在了握手协议之间，用于在 Record Layer 中启动安全参数，后续的加解密就是受到加密和 MAC 保护的了。
+
+这里，连接的 TLS 握手需要至少 2 个 RTT，再加上连接建立的握手，则至少需要 3 RTT 才能开始发送应用数据，效率会受到影响。
+
+为了加快数据传输效率，可以采用会话恢复技术。在 TLS 握手完成后，是会建立会话的，并且 Server 会告诉 Client 一个会话 ID（SessionID），用以方便 Client 后续恢复会话。
+
+Client 在下次建立连接的时候，带上之前的会话 ID，Server 会解开会话 ID，并获取之前协商好的参数（当然，这里其实要求客户端也缓存了之前协商好的安全参数），然后双方就可以重新恢复安全连接了。
+
+会话恢复的握手协议流程：
+
+```txt
+  Client                                                Server
+  
+  ClientHello                   -------->
+                                                  ServerHello
+                                           [ChangeCipherSpec]
+                               <--------             Finished
+  [ChangeCipherSpec]
+  Finished                      -------->
+  Application Data              <------->     Application Data
+```
+
+这里，节约了一个 RTT，即 TLS 握手需要 1 个 RTT，同时因为 TCP 连接建立占一个 RTT，所以 TLS 1.2 的会话恢复技术需要 2 RTT 的时间。
+
+**注意：**
+
+- 客户端最后的 Finished 和 Application Data 是一起发送的。
+- TLS 1.3 可以支持 0-RTT，简单来说，就是把会话 ID 交给 Server 的时候，把密文数据也一起丢给 Server 了。
+
+### 消息详解
+
+TLS 1.2 定义了握手阶段的各个消息所包含的内容和规范。
+
+#### HelloRequest
+
+可以在任意时间由 Server 发起，这在签名的握手流程中并未标出，因为这是一个特殊的消息。
+
+HelloRequest 是一个简单的通知，告诉 Client 应该开始重协商流程，Client 应该在合适的时候发起 ClientHello，以重新开始协商。
+
+该消息是一种信号，因此本身不需要传递任何负载信息。
+
+```txt
+struct { } HelloRequest;
+```
+
+**注意：**
+
+- 如果 Server 发送了一个 HelloRequest 但没有收到一个 ClientHello 响应，它应该用一个致命错误 alert 消息关闭连接。
+- 在发送一个 HelloRequest 之后，Server 不应该重复这个请求（直到握手协商完成）。
+
+#### ClientHello
+
+当一个 Client 第一次连接一个 Server 时，发送的第一条消息必须是 ClientHello。Client 也能发送一个 ClientHello 作为对 HelloRequest 的响应。
+
+ClientHello 提供了客户端支持的安全参数，包括：
+
+- 加密套件，包括：
+  - 密钥交换算法
+  - Record 的加密算法
+  - Record 的 MAC 算法
+- Client 的随机数
+- 压缩算法
+
+此外：
+
+- 如果需要做会话恢复，Client 需要提供 Session ID。
+- Client 需要通过 Extensions 给出自己支持和证书相关的公钥私钥签名算法。
+
+具体结构为：
+
+```txt
+struct {
+    ProtocolVersion client_version;                     /* 客户端希望在此会话期间进行通信的 TLS 协议的版本 */
+                                                        /* 这应该是客户端支持的最新版本。TLS 1.2 这里的取值为 {3, 3} */
+    Random random;                                      /* 客户端生成的随机数 */
+    SessionID session_id;                               /* 客户端希望用于此连接的会话 ID
+                                                        /* 如果没有可用的 session_id，或者客户端希望生成新的安全参数，则该字段为空。 */
+
+    CipherSuite cipher_suites<2..2^16-2>;               /* 这是客户端支持的加密选项的列表，其中客户端的首选优先。*/
+                                                        /* 如果 session_id 字段不为空（会话恢复请求），该向量必须至少包含来自该会话的 cipher_suite。 */
+                                                        /* 每个密码套件都定义了一个密钥交换算法、一个加密算法（包括密钥长度）、一个 MAC 算法和一个 PRF。 */
+                                                        /* 服务器将选择一个密码套件，或者，如果没有提供可接受的选择，则返回握手失败警报并关闭连接。 */
+
+    CompressionMethod compression_methods<1..2^8-1>;    /* 这是客户端支持的压缩方法列表，按客户端偏好排序。 */
+                                                        /* 如果 session_id 字段不为空（会话恢复请求），它必须包含来自该会话的压缩方法。 */
+
+    select (extensions_present) {                       /* 扩展列表，客户端可以通过在扩展字段中发送数据来向服务器请求扩展功能。 */
+        case false:
+            struct {};
+        case true:
+            Extension extensions<0..2^16-1>;
+    };
+} ClientHello;
+
+struct {
+    uint8 major;
+    uint8 minor;
+} ProtocolVersion;
+
+struct {
+    uint32 gmt_unix_time;                       /* 采用标准 UNIX 32 位格式的当前时间和日期。采用发送方的内部时钟。该时间并不需要精确 */
+    opaque random_bytes[28];                    /* 28 字节随机数 */
+} Random;
+```
+
+TLS 1.2 协议中定义了如下密码套件：
+
+```txt
+/***************************************
+【初始套件】
+初始时，用的密钥套件是：`TLS_NULL_WITH_NULL_NULL`，是该通道上第一次握手期间 TLS 连接的初始状态。
+不得在 Hello Message 中用该套件，因为它不提供安全连接的保护。
+***************************************/
+CipherSuite TLS_NULL_WITH_NULL_NULL               = { 0x00,0x00 };
+
+
+/***************************************
+【RSA 密钥交换的套件】
+以下 CipherSuite 定义要求服务器提供可用于密钥交换的 RSA 证书。
+同时，服务器可以在 Certificate Request 消息中请求 Client 提供任何具有签名能力的证书。
+***************************************/
+CipherSuite TLS_RSA_WITH_NULL_MD5                 = { 0x00,0x01 };
+CipherSuite TLS_RSA_WITH_NULL_SHA                 = { 0x00,0x02 };
+CipherSuite TLS_RSA_WITH_NULL_SHA256              = { 0x00,0x3B };
+CipherSuite TLS_RSA_WITH_RC4_128_MD5              = { 0x00,0x04 };
+CipherSuite TLS_RSA_WITH_RC4_128_SHA              = { 0x00,0x05 };
+CipherSuite TLS_RSA_WITH_3DES_EDE_CBC_SHA         = { 0x00,0x0A };
+CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA          = { 0x00,0x2F };
+CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA          = { 0x00,0x35 };
+CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA256       = { 0x00,0x3C };
+CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA256       = { 0x00,0x3D };
+
+
+/***************************************
+【DH 密钥交换的套件】
+以下密码套件定义用于服务器身份验证（以及可选的客户端身份验证）Diffie-Hellman。 
+DH 表示密码套件，其中服务器的证书包含由证书颁发机构 (CA) 签名的 Diffie-Hellman 参数。 
+DHE 表示临时 Diffie-Hellman，其中 Diffie-Hellman 参数由 CA 签署的具有签名能力的证书签名。
+***************************************/
+CipherSuite TLS_DH_DSS_WITH_3DES_EDE_CBC_SHA      = { 0x00,0x0D };
+CipherSuite TLS_DH_RSA_WITH_3DES_EDE_CBC_SHA      = { 0x00,0x10 };
+CipherSuite TLS_DHE_DSS_WITH_3DES_EDE_CBC_SHA     = { 0x00,0x13 };
+CipherSuite TLS_DHE_RSA_WITH_3DES_EDE_CBC_SHA     = { 0x00,0x16 };
+CipherSuite TLS_DH_DSS_WITH_AES_128_CBC_SHA       = { 0x00,0x30 };
+CipherSuite TLS_DH_RSA_WITH_AES_128_CBC_SHA       = { 0x00,0x31 };
+CipherSuite TLS_DHE_DSS_WITH_AES_128_CBC_SHA      = { 0x00,0x32 };
+CipherSuite TLS_DHE_RSA_WITH_AES_128_CBC_SHA      = { 0x00,0x33 };
+CipherSuite TLS_DH_DSS_WITH_AES_256_CBC_SHA       = { 0x00,0x36 };
+CipherSuite TLS_DH_RSA_WITH_AES_256_CBC_SHA       = { 0x00,0x37 };
+CipherSuite TLS_DHE_DSS_WITH_AES_256_CBC_SHA      = { 0x00,0x38 };
+CipherSuite TLS_DHE_RSA_WITH_AES_256_CBC_SHA      = { 0x00,0x39 };
+CipherSuite TLS_DH_DSS_WITH_AES_128_CBC_SHA256    = { 0x00,0x3E };
+CipherSuite TLS_DH_RSA_WITH_AES_128_CBC_SHA256    = { 0x00,0x3F };
+CipherSuite TLS_DHE_DSS_WITH_AES_128_CBC_SHA256   = { 0x00,0x40 };
+CipherSuite TLS_DHE_RSA_WITH_AES_128_CBC_SHA256   = { 0x00,0x67 };
+CipherSuite TLS_DH_DSS_WITH_AES_256_CBC_SHA256    = { 0x00,0x68 };
+CipherSuite TLS_DH_RSA_WITH_AES_256_CBC_SHA256    = { 0x00,0x69 };
+CipherSuite TLS_DHE_DSS_WITH_AES_256_CBC_SHA256   = { 0x00,0x6A };
+CipherSuite TLS_DHE_RSA_WITH_AES_256_CBC_SHA256   = { 0x00,0x6B };
+
+
+/***************************************
+【匿名 DH 密钥交换的套件】
+匿名交换，后续就不需要 Server 再发 Certificate 消息了。
+以下密码套件用于完全匿名的 Diffie-Hellman 通信，其中任何一方都未经身份验证。 请注意，此模式容易受到中间人攻击。
+除非应用层明确要求允许匿名密钥交换，否则 TLS 1.2 实现不得使用这些密码套件。
+***************************************/
+CipherSuite TLS_DH_anon_WITH_RC4_128_MD5          = { 0x00,0x18 };
+CipherSuite TLS_DH_anon_WITH_3DES_EDE_CBC_SHA     = { 0x00,0x1B };
+CipherSuite TLS_DH_anon_WITH_AES_128_CBC_SHA      = { 0x00,0x34 };
+CipherSuite TLS_DH_anon_WITH_AES_256_CBC_SHA      = { 0x00,0x3A };
+CipherSuite TLS_DH_anon_WITH_AES_128_CBC_SHA256   = { 0x00,0x6C };
+CipherSuite TLS_DH_anon_WITH_AES_256_CBC_SHA256   = { 0x00,0x6D };
+```
+
+而对于 TLS 1.2 中的压缩算法：
+
+```txt
+enum { null(0), (255) } CompressionMethod;
+```
+
+看起来 TLS 1.2 握手的时候目前根本没有压缩算法。此外，TLS 1.2 协议中要求该字段是必填，同时客户端和服务器双方都必须支持 CompressionMethod.null 的压缩方法（即不压缩）。
+
+> This vector MUST contain, and all implementations MUST support, CompressionMethod.null. Thus, a client and server will always be able to agree on a compression method.
+
+有一些 RFC 中提出了新的 CompressionMethod，但是看起来用的并不广泛。随便抓一个包都可以看到未启动压缩：
+
+![](assets/compressnull.png)
+
+我个人也认为启动压缩意义不大，因为 HTTP 应用层经常会给 HTTP 消息压缩数据，所以到 TLS Record Layer 时，协议数据已经比较高熵了，不太容易能继续压小。
+
+对于扩展，有一个 ClientHello 必须要传递的重要扩展：**signature_algorithms**，该扩展告诉 Server 自己可以能够支持哪些证书私钥签名的验证，Server 自己可以用其中的算法来作为签名。
+
+```txt
+struct {
+    ExtensionType extension_type;           /* 扩展项的类型 */
+    opaque extension_data<0..2^16-1>;       /* 针对 ExtensionType 的信息 */
+} Extension;
+
+enum {
+    signature_algorithms(13), (65535)
+} ExtensionType;
+
+
+/* 这个是 signature_algorithms 的内容，列出了客户端愿意验证的单个哈希/签名对，最期望的放在最前面 */
+SignatureAndHashAlgorithm supported_signature_algorithms<2..2^16-2>;
+
+/* Hash 和 Signature 算法成对出现 */
+struct {
+    HashAlgorithm hash;                     /* 该字段表示可以使用的哈希算法。 */
+    SignatureAlgorithm signature;           /* 该字段表示可以使用的签名算法。 */
+} SignatureAndHashAlgorithm;
+
+enum {
+    none(0),
+    md5(1),
+    sha1(2),
+    sha224(3),
+    sha256(4),
+    sha384(5),
+    sha512(6), (255)
+} HashAlgorithm;
+
+enum {
+    anonymous(0),
+    rsa(1),
+    dsa(2),
+    ecdsa(3),
+    (255)
+} SignatureAlgorithm;
+```
+
+**注意：**
+
+- Server 不能返回此扩展，只能被动接受 client 的该扩展。
+
+抓包可以看到支持的签名算法扩展：
+
+![](assets/signature_algorithms.png)
+
+#### ServerHello
+
+ClientHello 告诉了 Server 客户端可以支持的安全参数，那么 Server 找到一个可接受的算法集时，Server 发送 ServerHello 消息作为对 ClientHello 消息的响应。
+
+除此外，Server 提供自己的随机数。
+
+```txt
+struct {
+    ProtocolVersion server_version;                     /* 确定使用的 TLS 版本 */
+    Random random;                                      /* Server 的随机数 */
+    SessionID session_id;                               /* 如果为新会话，这里会生成一个新的，方便后续会话恢复。*/
+                                                        /*如果是复用会话，这里保持和 ClientHello 的会话 ID 一致 */
+    CipherSuite cipher_suite;                           /* Server 从 ClientHello 的密码套件中选择一个 */
+    CompressionMethod compression_method;               /* Server 从 ClientHello 的压缩算法中选择一个 */
+
+    select (extensions_present) {                       /* Server 发送的扩展，不需要发送对签名的选择 */
+        case false:
+            struct {};
+        case true:
+            Extension extensions<0..2^16-1>;
+    };
+} ServerHello;
+```
+
+这里需要注意的是，Server 不需要发送对 ClientHello 中签名选择的扩展。为什么呢？因为在所有的签名数据中，就会带上签名算法：
+
+```txt
+/* 所有需要签名的数据都满足如下格式 */
+struct {
+    SignatureAndHashAlgorithm algorithm;
+    opaque signature<0..2^16-1>;
+} DigitallySigned;
+
+struct {
+    HashAlgorithm hash;                     /* 该字段表示可以使用的哈希算法。 */
+    SignatureAlgorithm signature;           /* 该字段表示可以使用的签名算法。 */
+} SignatureAndHashAlgorithm;
+```
+
+一个简单的抓包：
+
+![](assets/serverhello.png)
+
+#### Certificate*
+
+如果协商出的密码套件是 DH_anon，则 Server 不应该发送该消息，因为这种方法本身就是`匿名`的密钥交换算法，不需要对身份认证。
+
+当然，选择这种 DH_anon 方式，跳过该消息的最大缺点是可能遭遇中间人攻击，因为没有对证书进行验证。
+
+```txt
+opaque ASN.1Cert<1..2^24-1>;
+
+struct {
+    ASN.1Cert certificate_list<0..2^24-1>;    /* 证书的序列（链） 发件人的证书必须在列表中排在第一位。*/
+                                              /* 后面的每个证书必须直接证明它前面的证书。 */
+                                              /* 因为根证书是额外派发的（例如内置在系统、或者自己去信赖的），所以根证书不用包含在此 */
+} Certificate;
+```
+
+**注意：**
+
+- 密钥交换算法的选择，会限制可以使用的证书类型，本文对此限制不做赘述，详细可以参考 [Server Certificate](https://www.rfc-editor.org/rfc/rfc5246.html#section-7.4.2)。
+
+一个简单的抓包：
+
+![](assets/certificate.png)
+
+#### ServerKeyExchange*
+
+Server 提供密钥交换算法所需要的更多信息，这些信息会被 Server 证书公钥签名，这也是一种 Client 对 Server 是否持有私钥的验证（认证 Server 身份）。因为不认证 Server 身份就接收 Server 提供的信息（如 DH 素数），容易受到攻击。
+
+对于以下密钥交换算法是不用发送该消息的，因为不需要 Server 提供额外的信息：
+
+- RSA：对于该交换算法，客户端使用公钥加密随机数即可交换对称密钥。
+- DH_DSS：在证书中就会包含静态的 DH 信息，也就不需要额外再发送信息了。
+- DH_RSA：原因同 DH_DSS。
+
+该消息的结构如下：
+
+```txt
+enum {
+    dhe_dss,
+    dhe_rsa,
+    dh_anon,
+    rsa,
+    dh_dss,
+    dh_rsa
+    /* may be extended, e.g., for ECDH -- see [TLSECC] */
+} KeyExchangeAlgorithm;
+
+/* 临时 DH 参数 */
+struct {
+    opaque dh_p<1..2^16-1>;     /* 用于 Diffie-Hellman 运算的素数模数。 */
+    opaque dh_g<1..2^16-1>;     /* 用于 Diffie-Hellman 操作的生成器。*/
+    opaque dh_Ys<1..2^16-1>;    /* 服务器的 Diffie-Hellman 公共值 (g^X mod p)。 */
+} ServerDHParams;
+
+ struct {
+    select (KeyExchangeAlgorithm) {
+        case dh_anon:
+            ServerDHParams params;                  /* 服务器的密钥交换参数，dh_anon 是属于匿名交互。 */
+        case dhe_dss:
+        case dhe_rsa:
+            ServerDHParams params;                  /* 服务器的密钥交换参数。 */
+            digitally-signed struct {               /* 对于非匿名密钥交换，对服务器密钥交换参数进行签名。 */
+                opaque client_random[32];
+                opaque server_random[32];
+                ServerDHParams params;
+            } signed_params;
+        case rsa:
+        case dh_dss:
+        case dh_rsa:
+            struct {} ;                 /* message is omitted for rsa, dh_dss, and dh_rsa */
+        /* may be extended, e.g., for ECDH -- see [TLSECC] */
+    };
+} ServerKeyExchange;
+```
+
+那可能有人就有疑问了，RSA 密钥交换算法使用证书公钥来加密密钥，为什么不认证 Server 的身份（是否持有私钥）呢？
+
+其实，Server 的身份认证是推迟到了最后的 Finished 期间，因为 Server 需要用私钥才能解密出 Client 提供的对称密钥，进而派生出实际的加解密密钥，因此如果 Server 没有私钥，那么 Server 无法派生出正确的加密密钥和 MAC 密钥，进而 Client 是无法解密以及验证 Server 的 Finished 数据的。
+
+一个简单的抓包：
+
+![](assets/certificate.png)
+
+#### CertificateRequest*
+
+一个非匿名的 Server 可以选择性地请求一个 Client 发送的证书。
+
+消息结构式：
+
+```txt
+struct {
+    ClientCertificateType certificate_types<1..2^8-1>;        /* 要求客户端可能提供的证书类型列表 */
+
+    SignatureAndHashAlgorithm
+    supported_signature_algorithms<2^16-1>;   /* 服务器能够验证的哈希/签名算法对列表，按优先级降序排列 */
+                                              /* 类似于 client hello 时的 signature_algorithms 扩展 */
+                                              /* 用于协商客户端如何使用证书的 key 进行签名的 */
+
+    DistinguishedName
+    certificate_authorities<0..2^16-1>;       /* 可接受的 CA 列表，若为空则客户端可以发送任何 CA 的证书 */
+} CertificateRequest;
+
+enum {
+    rsa_sign(1),                                    /* 包含 RSA key 的证书 */
+    dss_sign(2),                                    /* 包含 DSA key 的证书 */
+    rsa_fixed_dh(3),                                /* 包含静态 DH Key 的证书 */
+    dss_fixed_dh(4),                                /* 包含静态 DH Key 的证书 */
+    rsa_ephemeral_dh_RESERVED(5),
+    dss_ephemeral_dh_RESERVED(6),
+    fortezza_dms_RESERVED(20), (255)
+} ClientCertificateType;
+
+opaque DistinguishedName<1..2^16-1>;
+```
+
+#### ServerHelloDone
+
+ServerHelloDone 消息已经被 Server 发送以表明 ServerHello 及其相关消息的结束。发送这个消息之后, Server 将会等待 Client 发过来的响应。
+
+这个消息意味着 Server 发送完了所有支持密钥交换的消息，Client 能继续它的密钥协商，证书校验等步骤。
+
+在收到 ServerHelloDone 消息之后，Client 应当验证 Server 提供的是否是有效的证书，如果有要求的话, 还需要进一步检查 Server hello 参数是否可以接受。
+
+这仅是一个简单的信号，因此结构为空：
+
+```txt
+struct { } ServerHelloDone;
+```
+
+一个简单的抓包：
+
+![](assets/serverhellodone.png)
+
+#### Client Certificate*
+
+这个消息只能在 Server 请求客户端证书时发送（即 Server 发送 Certificate Request）。
+
+如果没有合适的证书，Client 必须发送一个不带证书的 Client Certificate 消息。
+
+该结构和 Server 的 Certificate 结构是相同的：
+
+```txt
+opaque ASN.1Cert<1..2^24-1>;
+
+struct {
+    ASN.1Cert certificate_list<0..2^24-1>;    /* 证书的序列（链） 发件人的证书必须在列表中排在第一位。*/
+                                              /* 后面的每个证书必须直接证明它前面的证书。 */
+                                              /* 因为根证书是额外派发的（例如内置在系统、或者自己去信赖的），所以根证书不用包含在此 */
+} Certificate;
+```
+
+#### ClientKeyExchange
+
+这个消息始终由 Client 发送，并且是首次握手必须发送的。该消息用于交换对称密钥。
+
+**注意：**
+
+- 这里交换的对称密钥其实是 pre master secret，而非在 Record Layer 的安全参数 master secret。
+- master secret 是由 pre master secret 派生出来的。
+
+master secret 的派生方法：
+
+```txt
+master_secret = PRF(pre_master_secret,
+                    "master secret",
+                    ClientHello.random + ServerHello.random)
+                    [0..47];
+```
+
+双方对 pre_master_secret 达成一致后，就能各自计算出 master secret 了，进而可以在 Record Layer 推导出 MAC 和加密密钥。
+
+ClientKeyExchange 的消息结构如下：
+
+```txt
+enum { implicit, explicit } PublicValueEncoding;
+
+struct {
+    select (PublicValueEncoding) {
+        case implicit: struct { };
+        case explicit: ECPoint ecdh_Yc;
+    } ecdh_public;
+} ClientECDiffieHellmanPublic;
+
+struct {
+  select (KeyExchangeAlgorithm) {
+      case rsa:
+          EncryptedPreMasterSecret;
+      case dhe_dss:
+      case dhe_rsa:
+      case dh_dss:
+      case dh_rsa:
+      case dh_anon:
+          ClientDiffieHellmanPublic;
+      case ec_diffie_hellman: 
+          ClientECDiffieHellmanPublic;
+  } exchange_keys;
+} ClientKeyExchange;
+```
+
+不同的密钥交换算法，最终的 ClientKeyExchange 消息结构是不同的。
+
+对于 RSA 密钥交换算法：
+
+```txt
+struct {
+    public-key-encrypted
+    PreMasterSecret pre_master_secret;                  /* 此随机值由客户端生成，用于生成主密钥 */
+                                                        /* 该值在传输的前会使用服务器公钥进行 RSA 加密 */
+} EncryptedPreMasterSecret;
+
+struct {
+    ProtocolVersion client_version;                     /* 客户端支持的最新 TLS 版本。 这用于检测版本回滚攻击。 */
+    opaque random[46];                                  /* 客户端生成的 46 字节的随机数 */
+} PreMasterSecret;
+```
+
+对于 DH 交换算法：
+
+```txt
+enum {
+    implicit,                                         /* 如果客户端发送的证书包含合适的 Diffie-Hellman 密钥 */
+                                                      /* 则 Yc 是隐式的，不需要再次发送。此时枚举为 implicit */
+    explicit                                          /* 客户端需要显式发送 Yc。此时枚举为 explicit */
+} PublicValueEncoding;
+
+struct {
+    select (PublicValueEncoding) {
+        case implicit: struct { };                      /* 隐式时，Yc 通过证书已经发送了，此时不必再发 */
+        case explicit: opaque dh_Yc<1..2^16-1>;         /* 显式时，Yc 在这里发送 */
+    } dh_public;
+} ClientDiffieHellmanPublic;
+```
+
+一个简单的抓包：
+
+![](assets/clientkeyexchange.png)
+
+#### CertificateVerify*
+
+这个消息用于对一个 Client 的证书进行显式验证。这个消息只能在 Client 发送了证书并且证书具有签名能力时才能发送。
+
+消息结构为：
+
+```txt
+struct {
+    digitally-signed struct {
+        opaque handshake_messages[handshake_messages_length];
+    }
+} CertificateVerify;
+```
+
+这里的 handshake_message 包括了自握手以来的所有信息的拼接，即从 ClientHello 开始到本条信息（但是不包括本条信息）的所有信息。
+
+在签名中使用的 hash 和签名算法必须是 Server 发送的 CertificateRequest 消息中 supported_signature_algorithms 字段所列出的算法中的一种。
+
+**注意：**
+
+- Server 如何知道 Client 用的是什么签名算法呢？前面也提到了，在 TLS 1.2 所有签名数据中，会包含使用的签名算法。
+
+#### Finished
+
+一个 Finished 消息一直会在一个 ChangeCipherSpec 消息后立即发送，以证明密钥交换和认证过程是成功的。
+
+一个 ChangeCipherSpec 消息必须在其它握手消息和结束消息之间被接收。
+
+Finished 的消息结构如下：
+
+```txt
+struct {
+    opaque verify_data[verify_data_length];
+} Finished;
+
+verify_data =  PRF(master_secret, finished_label, Hash(handshake_messages))
+               [0..verify_data_length-1];
+```
+
+finished_label 取值为：
+
+- Client 发送的 Finished 消息，取值为 `client finished`
+- Server 发送的 Finished 消息，取值为 `server finished`
+
+handshake_messages 取值为：
+
+- 所有在本次握手过程到但不包括本消息的消息中的数据。
+
+一个简单的抓包，可以看出，Finished 是加密数据：
+
+![](assets/finished.png)
+
 ## Change Cipher Spec Protocol
 
+Change Cipher Spec Protocol 的存在是为了发出信号，并进行连接状态的转换，启用新的连接状态（目的是为了启用相关的密码参数）。
+
+该协议由单个消息组成，该消息在当前（不是挂起的）连接状态下被加密和压缩。该消息由一个值 1 的字节组成。
+
+```txt
+struct {
+    enum { change_cipher_spec(1), (255) } type;
+} ChangeCipherSpec;
+```
+
+客户端和服务器都能发送 ChangeCipherSpec 消息，通知接收方后续记录将受到新协商的密钥规范和密钥（就是将已经设置好密码参数的 Pending 状态设置到 Current 状态）。
+
+接收到该消息，接收器指示记录层立即将 Pending read 复制到 Current read。
+
+发送此消息后，发送者立即指示记录层将 Pending write 复制到 Current read。
+
+ChangeCipherSpec 消息在安全参数已被商定之后并且在发送验证 Finished 消息之前在握手期间发送。
+
 ## Alert Protocol
+
+ 提供 alert 内容类型用来表示关闭信息和错误。与其他消息一样，alert 消息也会根据 Current 进行加密（当然，握手的时候 Current 一般是空，此时就没加密）。
+
+协议消息数据结构：
+
+```txt
+enum { warning(1), fatal(2), (255) } AlertLevel;
+      
+struct {
+    AlertLevel level;
+    AlertDescription description;
+} Alert;
+```
+
+TLS 1.2 的告警描述信息有：
+
+```txt
+enum {
+    close_notify(0),
+    unexpected_message(10),
+    bad_record_mac(20),
+    decryption_failed_RESERVED(21),
+    record_overflow(22),
+    decompression_failure(30),
+    handshake_failure(40),
+    no_certificate_RESERVED(41),
+    bad_certificate(42),
+    unsupported_certificate(43),
+    certificate_revoked(44),
+    certificate_expired(45),
+    certificate_unknown(46),
+    illegal_parameter(47),
+    unknown_ca(48),
+    access_denied(49),
+    decode_error(50),
+    decrypt_error(51),
+    export_restriction_RESERVED(60),
+    protocol_version(70),
+    insufficient_security(71),
+    internal_error(80),
+    user_canceled(90),
+    no_renegotiation(100),
+    unsupported_extension(110),           /* new */
+    (255)
+} AlertDescription;
+```
+
+更多告警消息和错误处理相关内容，可以参考 [Alert Protocol](https://www.rfc-editor.org/rfc/rfc5246.html#section-7.2)。
+
+## 安全
+
+关于 TLS 1.2 协议中的安全部分，可以参考：
+
+- [Implementation Notes](https://www.rfc-editor.org/rfc/rfc5246.html#appendix-D)
+- [Backward Compatibility](https://www.rfc-editor.org/rfc/rfc5246.html#appendix-E)
+- [Security Analysis](https://www.rfc-editor.org/rfc/rfc5246.html#appendix-F)
 
 ## 附录：参考文献
 
@@ -452,4 +1139,4 @@ struct {
 1. [HTTPS 温故知新（五） —— TLS 中的密钥计算](https://halfrost.com/https-key-cipher/)
 1. [HTTPS 温故知新（六） —— TLS 中的 Extensions](https://halfrost.com/https-extensions/)
 1. [理解 Deffie-Hellman 密钥交换算法](http://wsfdl.com/algorithm/2016/02/04/%E7%90%86%E8%A7%A3Diffie-Hellman%E5%AF%86%E9%92%A5%E4%BA%A4%E6%8D%A2%E7%AE%97%E6%B3%95.html)
-1. [ssllabs](https://www.ssllabs.com/ssl-pulse/)，一个非常不错的 TLS 安全相关统计网站。
+1. [ssllabs](https://www.ssllabs.com/ssl-pulse/)
