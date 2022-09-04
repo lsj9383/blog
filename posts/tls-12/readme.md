@@ -10,7 +10,7 @@ TLS 1.2 RFC 为 [RFC5246](https://www.rfc-editor.org/rfc/rfc5246.html)。
 
 这里可以简单看到 RFC5246 的形成过程，也是一个持久战：
 
-![history](assets/history.png)
+![history](assets/tls12-history.png)
 
 虽然目前已经有更先进的 TLS 1.3 但是目前暂未普及，国内主流使用的仍然是 TLS 1.2。
 
