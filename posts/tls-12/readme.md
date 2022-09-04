@@ -477,12 +477,14 @@ struct {
 
 压缩必须是无损的，并且不能将内容长度增加超过 1024 字节。如果解压函数遇到一个 TLSCompressed.fragment 会解压到超过 2^14 字节的长度，它必须报告一个致命的解压失败错误（因为这已经超过了 TLSPlaintext.fragment 所允许的最大长度）。
 
+```txt
 struct {
     ContentType type;                               /* same as TLSPlaintext.type */
     ProtocolVersion version;                        /* same as TLSPlaintext.version */
     uint16 length;                                  /* TLSCompressed.fragment 的长度（以字节为单位）。 长度不得超过 2^14 + 1024。 */
     opaque fragment[TLSCompressed.length];          /* TLSPlaintext.fragment 压缩后的数据 */
 } TLSCompressed;
+```
 
 **注意：**
 

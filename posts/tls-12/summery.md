@@ -116,7 +116,27 @@ struct {
     opaque                 client_random[32];
     opaque                 server_random[32];
 } SecurityParameters;
+
+enum { server, client } ConnectionEnd;
+
+enum { tls_prf_sha256 } PRFAlgorithm;
+
+enum { null, rc4, 3des, aes } BulkCipherAlgorithm;
+
+enum { stream, block, aead } CipherType;
+
+enum { null, hmac_md5, hmac_sha1, hmac_sha256, hmac_sha384, hmac_sha512} MACAlgorithm;
+
+enum { null(0), (255) } CompressionMethod;
 ```
+
+**注意：**
+
+- 上面这样的数据结构是比较容易理解的，类似于 C 语言，但并非 C 语言，而是 TLS 1.2 协议中专门定义的表述性语言。
+- 这里对有些不太容易理解，或者容易误解的地方，的这里提一下：
+  - `opaque` 代表不透明的二进制数据，意思是当前结构体或者层中，并不理解该数据的内部结构，只能从变量上来判断该数据的作用。
+  - `opaque client_random[32];` 这个代表的是 32 字节数据。
+  - `T t[32];` 这里 t 仍然代表 32 字节的数据。若假设一个 T 占 4 字节，则意味着一个 t 是 8 个连续 T 的数组，一共占 32 字节。
 
 #### Record 密钥计算
 
@@ -275,7 +295,38 @@ TLS 1.2 协议中，连接状态本身的含义就是 Record Layer 的运行环�
 
 ### Record 分段
 
+Record Layer 的上层数据，在进入 Record Layer 的时候，做的第一个事情就是给数据包添加头部并分段，最终形成 `TLSPlaintext` 的如下数据结构：
+
+```txt
+struct {
+    ContentType type;                         /* 指明上层协议的含义，是个枚举，有这些协议：change_cipher_spec、alert、handshake、application_data */
+    ProtocolVersion version;                  /* 正在使用的协议版本。 {3, 3} 代表 TLS 版本 1.2 */
+    uint16 length;                            /* 下面那个 fragment 的长度（以字节为单位），长度不得超过 2^14 */
+    opaque fragment[TLSPlaintext.length];     /* 上层数据 */
+} TLSPlaintext;
+
+enum {
+    change_cipher_spec(20),
+    alert(21),
+    handshake(22),
+    application_data(23),
+    (255)
+} ContentType;
+
+struct {
+    uint8 major;
+    uint8 minor;
+} ProtocolVersion;
+```
+
+**注意：**
+
+- 可以认为 type, version, length 是该段中传输分段的头部。
+- 这里说的 ContentType 不是指的 HTTP 的 Content-Type Header，这里指的是 Record 的上层协议枚举，例如 Handshake Protocol、Alert Protocol 这种。
+
 ### Record 压缩
+
+如果安全参数中已经确定并指定了压缩算法，则会对 `TLSPlaintext` 进行压缩，并转换成 `TLSCompressed`
 
 ### Record 保护
 
