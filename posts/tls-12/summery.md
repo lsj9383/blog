@@ -58,7 +58,7 @@ Record Layer 为上层数据传输提供了以下能力：
 - 分段（Fragment）
 - 压缩（Compress）
 - 一致性
-- 机要性。
+- 机要性
 
 如下所示：
 
@@ -839,10 +839,6 @@ struct {
 那可能有人就有疑问了，RSA 密钥交换算法使用证书公钥来加密密钥，为什么不认证 Server 的身份（是否持有私钥）呢？
 
 其实，Server 的身份认证是推迟到了最后的 Finished 期间，因为 Server 需要用私钥才能解密出 Client 提供的对称密钥，进而派生出实际的加解密密钥，因此如果 Server 没有私钥，那么 Server 无法派生出正确的加密密钥和 MAC 密钥，进而 Client 是无法解密以及验证 Server 的 Finished 数据的。
-
-一个简单的抓包：
-
-![](assets/certificate.png)
 
 #### CertificateRequest*
 
