@@ -1546,6 +1546,220 @@ CipherSuite TLS_DH_anon_WITH_AES_128_CBC_SHA256   = { 0x00,0x6C };
 CipherSuite TLS_DH_anon_WITH_AES_256_CBC_SHA256   = { 0x00,0x6D };
 ```
 
+## 实施注意事项
+
+TLS 协议无法防止许多常见的安全错误。这里提供了一些建议来帮助实施者。
+
+### 随机数生成和种子
+
+### 证书和认证
+
+在实现 TLS 1.2 协议时，需要负责验证证书的完整性，并且通常应该支持证书撤销消息。 
+
+应始终验证证书以确保由受信任的证书颁发机构 (CA) 正确签名，此外，应非常谨慎地选择和添加受信任的 CA。
+
+用户应该能够查看有关证书和根 CA 的信息。
+
+### 密码套件
+
+TLS 支持一系列不同密钥大小和相关密码算法的密码套件，其中一些是不够安全的。
+
+一个对 TLS 1.2 协议的合适实现不应支持过多的密码套件，避免引入安全问题。例如：
+
+- 强烈建议不要使用匿名 Diffie-Hellman，因为它无法防止中间人攻击。
+- 应用程序还应该强制执行最小和最大密钥大小。例如，包含 512 位 RSA 密钥或签名的证书链不适用于高安全性应用程序（现在一般 2048bit 以上的 RSA 才认为是安全的）。
+
+### 实施陷阱
+
+实施经验表明，早期 TLS 规范的某些部分不容易理解，并且一直是互操作性和安全问题的根源。
+
+这里包含了需要实施者特别注意的最重要事项的简短列表。
+
+TLS 协议问题：
+
+- 您是否正确处理了被分割为多个 TLS 记录的握手消息？
+  - 包括像 ClientHello 这样被分成几个小片段的极端案例？
+  - 您是否对超出最大分段大小的握手消息进行分段？特别是，证书和证书请求握手消息可能大到需要分段。
+- 你是否忽略了 ServerHello 之前所有 TLS 记录中的 TLS 记录层版本号？
+- 您是否正确处理 ClientHello 中的 TLS 扩展？
+- 您是否支持客户端和服务器发起的重新协商？虽然重新协商是一项可选功能，但强烈建议支持它。
+- 当服务器请求客户端证书，但没有合适的证书可用时，您是否正确发送空证书消息，而不是省略整个消息？
+
+加密问题：
+
+- 在 RSA 加密的 Pre master Secret 中，您是否正确发送并验证了版本号？当遇到错误时，是否继续握手以避免 Bleichenbacher 攻击？
+- 您使用什么对策来防止针对 RSA 解密和签名操作的定时攻击？
+- 在验证 RSA 签名时，您是否同时接受 NULL 和缺失参数？
+- 当使用 Diffie-Hellman 密钥交换时，您是否正确地从协商的密钥中去除前导零字节？
+- 您的 TLS 客户端是否检查服务器发送的 Diffie-Hellman 参数是否可接受？
+- 如何为 CBC 模式密码生成不可预测的 IV？
+- 您是否接受长 CBC 模式填充？
+- 您如何解决 CBC 模式定时攻击？
+- 您是否使用强大的随机数生成器来生成 Pre master secret、Diffie-Hellman 私有值、DSA 的 `k` 参数和其他关键安全参数值？
+
+## 安全分析
+
+TLS 协议在不安全的通道在客户端和服务器之间建立安全连接。
+
+本文档做了几个传统假设，包括：
+
+- 攻击者拥有大量计算资源并且无法从协议之外的来源获取秘密信息。
+- 攻击者有能力捕获、修改、删除、重放和篡改通过通信通道发送的消息。
+
+这里概述了如何设计 TLS 以抵抗各种攻击。
+
+### 握手协议安全
+
+握手协议负责协商密码安全参数并生成 master secret，它们共同构成与安全会话相关的主要密码参数。
+
+握手协议还可以选择性地验证拥有权威机构（CA）签署的证书的各方。
+
+#### 认证和密钥交换
+
+TLS 支持三种身份验证模式：
+
+- 双向认证
+- 单向认证（client 认证 server，但是 server 不认证 client）
+- 完全匿名（client 和 server 都不进行认证）
+
+对于 Server 和 Client 的认证，为了避免中间人攻击需要提供有效的证书链：
+
+- 如果服务器需要身份验证，则其证书消息必须提供有效的证书链。
+- 同样，要进行身份验证的客户端必须向服务器提供可接受的证书链。
+
+此外，每一方都有责任验证对方的证书是否有效并且没有过期或被吊销。
+
+
+密钥交换过程的一般目标是：
+
+- 创建一个通信方知道的 pre_master_secret
+- pre_master_secret 将用于生成 master_secret
+- master_secret 是生成 Finished 消息、加密密钥和 MAC 密钥所必需的
+- 通过发送正确的 Finished 消息，各方因此证明他们知道正确的 pre_master_secret
+
+**匿名密钥交换**
+
+可以使用 Diffie-Hellman 建立完全匿名的会话以进行密钥交换：
+
+- 服务器的公共参数包含在服务器密钥交换消息中
+- 客户端的公共参数在客户端密钥交换消息中发送
+
+不知道 DH 私有值的攻击者无法计算出 Diffie-Hellman 协商密钥（即 pre_master_secret）。
+
+**注意：**
+
+- 完全匿名的连接只能防止被动窃听。
+- 除非使用独立的防篡改通道来验证 Finished 消息没有被攻击者替换，否则在存在中间人攻击的环境中最好对服务器身份进行验证。
+
+**RSA 密钥交换和认证**
+
+使用 RSA 算法，密钥交换和服务器身份验证是相结合的：公钥包含在服务器的证书中。
+
+**注意：**
+
+- 服务器的静态 RSA 密钥泄露会导致受该静态密钥保护的所有会话的机密性丢失（即没有前向安全性 Perfect Forward Secrecy，PFS）。
+- 需要完美前向保密的 TLS 用户应该使用 DHE 密码套件。
+- 可以通过频繁更改服务器的私钥（和证书）来限制私钥泄露造成的损害。
+
+RSA 中，Client 对 Server 的认证流程：
+
+- 在验证服务器的证书后，客户端使用服务器的公钥加密一个 pre_master_secret。
+- 通过成功解码 pre_master_secret 并生成正确的 Finished 消息，服务器证明它知道与服务器证书对应的私钥。
+
+**带身份验证的 Diffie-Hellman 密钥交换**
+
+当使用 Diffie-Hellman 密钥交换时，服务器可以：
+
+- 提供包含固定 Diffie-Hellman 参数的证书
+- 或者使用服务器密钥交换消息发送一组使用 DSA 或 RSA 证书签名的临时 Diffie-Hellman 参数（DHE）。DHE 的临时参数在签名之前使用 hello.random 值进行哈希处理（ServerKeyExchange 中对参数签名的时候，会包含 random），以确保攻击者不会重播旧参数。
+
+无论哪种情况，客户端都可以验证证书或签名，以确保参数属于服务器。
+
+如果客户端具有包含固定 Diffie-Hellman 参数的证书，则其证书包含完成密钥交换所需的信息。
+
+在这种情况下，需要 **注意：**
+
+- 客户端和服务器每次通信时都会生成相同的 Diffie-Hellman 结果（即 pre_master_secret）。
+- 为防止 pre_master_secret 在内存中停留的时间过长，应尽快将其转换为 master_secret。
+- 客户端 Diffie-Hellman 参数必须与服务器提供的参数兼容，密钥交换才能正常工作。
+
+如果客户端有标准的 DSA 或 RSA 证书或未经身份验证，它会在客户端密钥交换消息中向服务器发送一组临时参数，然后可选地使用证书验证消息来验证自己。
+
+#### 版本回退攻击
+
+由于 TLS 包括对 SSL 2.0 版的实质性改进，攻击者可能会尝试使支持 TLS 的客户端和服务器回退到 2.0 版：
+
+- 当（且仅当）两个支持 TLS 的方使用 SSL 2.0 握手时，才会发生这种攻击。
+
+> Although the solution using non-random PKCS #1 block type 2 message padding is inelegant, it provides a reasonably secure way for Version 3.0 servers to detect the attack.  This solution is not secure against attackers who can brute-force the key and substitute a new ENCRYPTED-KEY-DATA message containing the same key (but with normal padding) before the application-specified wait threshold has expired. Altering the padding of the least-significant 8 bytes of the PKCS padding does not impact security for the size of the signed hashes and RSA key lengths used in the protocol, since this is essentially equivalent to increasing the input block size by 8 bytes.
+
+#### 检测针对握手协议的攻击
+
+攻击者可能会尝试对握手交换进行攻击，以使各方选择与他们通常选择的不同的加密算法。
+
+对于这种攻击，攻击者必须作为中间人主动更改一个或多个握手消息。
+
+如果发生这种情况，客户端和服务器将为 handshake_message 哈希计算不同的值（因为 handshake_message 不同，handshake_message 是一端收发的所有消息，在 Client 的 CertificateVerify 和双发的 Finished 中会使用）。
+
+因此，双方将不会接受彼此的 Finished 消息。同时，因为攻击者没有 master_secret，攻击者无法伪造 Finished 消息，因此攻击会被发现。
+
+#### 恢复会话
+
+当通过恢复会话建立连接时，新的 ClientHello.random 和 ServerHello.random 值将与会话的 master_secret 进行 hash。
+
+**注意：**
+
+- 这里指的就是 Finished 消息对消息会话保护的 hash 计算：`verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))`）。
+
+假设这里的 hash 计算中：
+
+- master_secret 没有被泄露
+- 并且用于生成加密密钥和 MAC 密钥的 hash 操作是安全的
+
+攻击者是无法篡改这里的 PRF 计算出的 verify_data 的。
+
+除非客户端和服务器都同意，否则无法恢复会话：
+
+- 如果任何一方怀疑会话可能已被破坏（例如 verify_data 被篡改了），或者证书可能已过期或被撤销，则应强制进行完全握手。
+
+此外，会话 ID 有如下建议：
+
+- 会话 ID 生命周期的上限为 24 小时，因为获得 master_secret 的攻击者可能能够冒充受害方，直到相应的会话 ID 退休。
+- 此外，在相对不安全的环境中运行的应用程序不应将会话 ID 写入磁盘进行存储。
+
+### 保护应用程序数据
+
+master_secret 与 ClientHello.random 和 ServerHello.random 进行哈希处理（PRF），为每个连接生成唯一的数据加密密钥和 MAC 机密：
+
+- 传出数据在传输前由 MAC 保护。
+- 为了防止消息重放或修改攻击，MAC 由 MAC 密钥、序列号、消息长度、消息内容和两个固定字符串计算得出。
+- 消息类型字段是必要的，以确保用于一个 TLS 记录层客户端的消息不会指向到另一个。
+- 序列号可确保检测到删除或重新排序消息的攻击。
+- 由于序列号是 64 位长，它们永远不会溢出。
+
+加密密钥和 MAC 密钥被破解：
+
+- 如果攻击者确实破解了加密密钥，则可以读取所有用它加密的消息。
+- 同样，MAC 密钥的泄露也可能使消息修改攻击成为可能。由于 MAC 也是加密的，因此消息更改攻击通常需要破坏加密算法以及 MAC。
+
+**注意：**
+
+- MAC 密钥可能比加密密钥更长，因此更难被破解，因此即使加密密钥被破解（例如暴力破解），消息也可以保持防篡改。
+
+### 拒绝服务攻击
+
+TLS 容易受到许多拒绝服务 (DoS) 攻击。特别是，发起大量 TCP 连接的攻击者可能会导致服务器消耗大量 CPU 来进行 RSA 解密。但是，由于 TLS 通常在 TCP 上使用，如果 TCP 堆栈使用适当的 TCP SYN 随机化，攻击者很难隐藏其来源点（进而可以对齐拉入黑名单）。
+
+由于 TLS 在 TCP 上运行，因此它也容易受到针对单个连接的许多 DoS 攻击。特别是，攻击者可以伪造 RST，从而终止连接，或伪造部分 TLS 记录，从而导致连接停止。
+
+这些攻击通常不能通过使用 TCP 的协议来防御。关注此类攻击的实施者或用户应使用 IPsec AH 或 ESP。
+
+## 后向兼容性
+
+后向兼容性（Backward Compatibility），即对以前版本的兼容，这里不展开了，直接参考 RFC 中描述的：[Backward Compatibility](https://www.rfc-editor.org/rfc/rfc5246.html#appendix-E)。
+
+
+
 ## 附录：参考文献
 
 1. [TLS 1.2(RFC5246)](https://www.rfc-editor.org/rfc/rfc5246.html)
