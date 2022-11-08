@@ -16,6 +16,8 @@
   - [RUP: 4+1](posts/se/rup41/readme.md)
   - [架构视图：5+1 视图](posts/se/view51/readme.md)
   - [REST](posts/se/rest/readme.md)
+  - [微服务实战](posts/se/microservice/readme.md)
+  - [微服务架构设计模式](posts/se/ms-arch-pattern/readme.md)
 - [发票](posts/invoice/readme.md)
   - [发票基础业务知识](posts/invoice/basic/readme.md)
   - [增值税防伪税控系统](posts/invoice/system/readme.md)
