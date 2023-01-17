@@ -126,7 +126,8 @@
 
 鸡尾酒 | 材料 | 制作步骤
 -|-|-
-长岛冰茶 | 金酒 15 ml、朗姆酒 15 ml、伏特加 15 ml、龙舌兰 15 ml、柠檬汁 15 ml、君度 10-15 ml、一勺白砂糖（或者 15 ml 糖浆？）、剩余可乐 |
+长岛冰茶（Long Island Ice Tea） | 金酒 15 ml、朗姆酒 15 ml、伏特加 15 ml、龙舌兰 15 ml、君度 10-15 ml、柠檬汁 15 ml、糖浆 15 ml、剩余可乐 | 1. 冷杯（可选）；<br>2. 向 shaker 种加入 5 种酒（4 个基酒、1 个利口酒）、柠檬汁、糖浆、冰块；2. 摇晃 shaker，使液体充分混合；<br>3. 杯中先倒入冰块，然后将 shaker 中混合的酒倒入杯中；<br>4. 将可乐倒入，把杯子倒满；<br>5. 把柠檬片放最上面做装饰。
+AMF（Adios Mother Fucker）| 金酒 15 ml、朗姆酒 15 ml、伏特加 15 ml、龙舌兰 15 ml、蓝橙利口酒 15 ml、柠檬汁 15 ml、糖浆 15 ml、剩余雪碧 |  1. 冷杯（可选）；<br>2. 向 shaker 种加入 5 种酒（4 个基酒、1 个利口酒）、柠檬汁、糖浆、冰块；2. 摇晃 shaker，使液体充分混合；<br>3. 杯中先倒入冰块，然后将 shaker 中混合的酒倒入杯中；<br>4. 将雪碧倒入，把杯子倒满；<br>5. 把柠檬片放最上面做装饰。
 
 ## 参考
 
@@ -142,3 +143,4 @@
 - [威士忌怎么调酒？三种Old-Fashioned古典鸡尾酒！在家也能调！](https://www.youtube.com/watch?v=cVlIh-XYwl0)
 - [威士忌是什么？怎么入门？](https://www.youtube.com/watch?v=HXDZ74cGz1g)
 - [拒 绝 “失 身 酒”](https://www.youtube.com/watch?v=chFRZzkKLjQ)
+- [ADIOS MOTHERF***ER!! The AMF Cocktail Recipe](https://www.youtube.com/watch?v=Y_jFdR_JSoU)
