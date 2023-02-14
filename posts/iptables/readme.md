@@ -23,22 +23,28 @@ IPTables 主要分为两个部分：
 
 ![](assets/021217_0051_6.png)
 
-### iptables 查询
+### iptables 规则查询
 
 ```sh
 # 列出指定 table 、指定 chain 的规则
 # 若省略 chain 则列出所有 chain 指定 table 的规则
-# 若省略 table 则默认为 filters
+# 若省略 table 则默认为 filter
+# -t 可以指定：raw mangle nat filter
+# -L 可以指定：INPUT OUTPUT FORWARD PREROUTING POSTROUTING
 $ iptables -t [<table>] -L [<chain>]
+$ iptables -t filter -L
 
 # 查看详细信息
 $ iptables -t [<table>] -vL [<chain>]
+$ iptables -t filter -vL
 
 # 【推荐】不进行 ip 反查（性能更高）
 $ iptables -t [<table>] -nvL [<chain>]
+$ iptables -t filter -nvL
 
 # 【推荐】可以打印规则编号
 $ iptables -t [<table>] -nvL [<chain>] --line
+$ iptables -t filter -nvL INPUT --line
 
 # 可以显示更具体的数值（数值不使用 K、M、G 等单位）
 $ iptables -t [<table>] -xnvL [<chain>]
@@ -71,7 +77,7 @@ Chain FORWARD (policy DROP 0 packets, 0 bytes)
 -|-
 pkts | 对应规则匹配到的报文的个数。
 bytes | 对应匹配到的报文包的大小总和。
-target | 规则对应的target，往往表示规则对应的”动作”，即规则匹配成功后需要采取的措施。
+target | 规则对应的 target，往往表示规则对应的”动作”，即规则匹配成功后需要采取的措施。如果需要由自定义链来处理，则也在 target 表示。
 prot | 表示规则对应的协议，是否只针对某些协议应用此规则。
 opt | 表示规则对应的选项。
 in | 表示数据包由哪个接口(网卡)流入，即从哪个网卡来。
@@ -83,7 +89,7 @@ destination | 表示规则对应的目标地址。可以是一个IP，也可以�
 
 ![](assets/041317_0547_6.png)
 
-### 管理规则
+### iptables 规则管理
 
 ```sh
 # 在链的末尾追加规则
@@ -93,12 +99,15 @@ $ iptables -t filter -I INPUT -s 192.168.1.146 -j DROP
 
 # 在链的开头追加规则
 $ iptables -t <table> -A <chain> <匹配条件> -j <action>
+$ iptables -t filter -A INPUT -s 192.168.1.146 -j ACCEPT
 
 # 清空指定表、指定链的规则
 $ iptables -t [<table>] -F <chain>
+$ iptables -t filter -F INPUT
 
 # 删除指定编号的规则
 $ iptables -t [<table>] -D <chain> <规则编号>
+$ iptables -t filter -D INPUT 1
 
 # 删除匹配条件的规则（方便直接运行执行删除命令。通过编号删除在每个机器上都不太一样。）
 $ iptables -D <chain> <匹配条件> -j <action>
@@ -116,6 +125,104 @@ $ iptables-save > /etc/sysconfig/iptables                   # CentOS 7
 # 如果需要恢复掉对 iptables 的修改（恢复到上一次保存的 iptables），可以重启 iptables
 $ service iptables restart                                  # CentOS 6
 $ iptables-restore < /etc/sysconfig/iptables                # CentOS 7
+```
+
+基本匹配条件：
+
+```sh
+# 匹配源地址 -s
+# 源地址可以填入多个，通过逗号分割
+# 源地址可以使用网段
+$ iptables ... -s <源地址> -j <执行动作>
+$ iptables -t filter -I INPUT -s 192.168.1.111,192.168.1.118 -j DROP
+$ iptables -t filter -I INPUT -s 192.168.1.0/24 -j ACCEPT
+iptables -t filter -I INPUT ! -s 192.168.1.111 -j ACCEPT
+
+# 匹配目标地址 -d
+$ iptables ... -d <目标地址> -j <执行动作>
+$ iptables -t filter -I OUTPUT -d 192.168.1.111 -j DROP
+$ iptables -t filter -I OUTPUT -d 192.168.1.111,192.168.1.118 -j DROP
+$ iptables -t filter -I INPUT -d 192.168.1.0/24 -j ACCEPT
+$ iptables -t filter -I INPUT ! -d 192.168.1.0/24 -j ACCEPT
+
+# 匹配协议 -p
+# -p 协议可以指定：tcp, udp, udplite, icmp, icmpv6,esp, ah, sctp, mh
+$ iptables ... -p <协议> -j <执行动作>
+$ iptables -t filter -I INPUT -p tcp -s 192.168.1.146 -j ACCEPT
+$ iptables -t filter -I INPUT ! -p udp -s 192.168.1.146 -j ACCEPT
+
+# 匹配流入网卡 -i
+$ iptables ... -t <输入网卡> -j <执行动作>
+$ iptables -t filter -I INPUT -p icmp -i eth4 -j DROP
+
+# 匹配输出网卡 -o
+$ iptables ... -o <输出网卡> -j <执行动作>
+$ iptables -t filter -I OUTPUT -p icmp -o eth4 -j DROP
+```
+
+TCP 模块的扩展匹配条件：
+
+```sh
+# 通过在命令中输入 -m <模块> 来引入外部模块。
+# 如果使用了扩展匹配条件，又没有使用 -m，则默认引入和 -p 协议同名的外部模块进行处理。
+
+# 匹配源端口 -m tcp --sport <源端口>
+# 端口可以指定连续范围
+$ iptables ... -m tcp --sport <源端口>
+$ iptables -t filter -I OUTPUT -d 192.168.1.146 -p tcp -m tcp --sport 22 -j REJECT
+$ iptables -t filter -I OUTPUT -d 192.168.1.146 -p tcp -m tcp --sport 22:80 -j REJECT
+$ iptables -t filter -I OUTPUT -d 192.168.1.146 -p tcp --sport 22 -j REJECT
+
+# 匹配目标端口 -m tcp --dport <目标端口>
+# 端口可以指定连续范围
+$ iptables ... -m tcp --dport <目标端口>
+$ iptables -t filter -I INPUT -s 192.168.1.146 -p tcp -m tcp --dport 22 -j REJECT
+$ iptables -t filter -I INPUT -s 192.168.1.146 -p tcp -m tcp --dport 22:80 -j REJECT
+$ iptables -t filter -I INPUT -s 192.168.1.146 -p tcp --dport 22:80 -j REJECT
+```
+
+TCP 模块的协议标识匹配条件：
+
+```sh
+# 匹配 TCP 协议标识 -m tcp --tcp-flags <需要匹配的 TCP 标识> <匹配 TCP 标识为 1 的>
+$ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --tcp-flags SYN,ACK,FIN,RST,URG,PSH SYN -j REJECT
+# 上面这个代表匹配条件：数据包的 SYN 为 1，而 ACK、FIN、RST、URG、PSH 标识位为 0
+$ iptables -t filter -I OUTPUT -p tcp -m tcp --sport 22 --tcp-flags SYN,ACK,FIN,RST,URG,PSH SYN,ACK -j REJECT
+$ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --tcp-flags ALL SYN -j REJECT
+$ iptables -t filter -I OUTPUT -p tcp -m tcp --sport 22 --tcp-flags ALL SYN,ACK -j REJECT
+
+# 匹配 TCP 新建连接的请求报文 -m tcp --syn
+# 等价于 –tcp-flags SYN,RST,ACK,FIN SYN
+$ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --syn -j REJECT
+```
+
+### iptables 自定义链
+
+```sh
+# 查询自定义链（和查询默认链是一样的）
+$ iptables -t <table> -L <自定义链>
+$ iptables -t filter -N IN_WEB
+
+# 创建自定义链，并指定其拥有的 table
+# 如果一个自定义链作用了多个 table，则更换 table 进行创建命令的执行
+$ iptables -t <table> -N <自定义链>
+$ iptables -t filter -N IN_WEB
+$ iptables -t filter -N IN_WEB; iptables -t raw -N IN_WEB
+
+# 将自定义链添加到默认链中
+# 本质上将匹配条件的数据包，交给默认链处理
+$ iptables -t filter -I INPUT -p tcp --dport 80 -j IN_WEB
+
+# 重命名自定义链
+$ iptables -E <原链名> <新链名>
+$ iptables -E IN_WEB WEB
+
+# 删除自定义链
+# 删除需要满足俩条件：
+#  - 自定义链没有被引用
+#  - 自定义链中没有任何规则
+$ iptables -X <自定义链>
+$ iptables -X IN_WEB
 ```
 
 ## 数据包流向
@@ -175,4 +282,86 @@ DNAT | 目标地址转换。
 REDIRECT | 在本机做端口映射。
 LOG | 在 /var/log/messages 文件中记录日志信息，然后将数据包传递给下一条规则，也就是说除了记录以外不对数据包做任何其他操作，仍然让下一条规则去匹配。
 
+每个链（钩子）都有默认策略，即数据包不满足匹配条件时，执行的动作。默认策略执行的动作一般为 ACCEPT，不建议设置为 DROP，主要是为了避免不小心执行了规则清理，导致管理员无法连接主机。
 
+## 扩展模块
+
+当需要使用扩展条件时，需要引入扩展模块：
+
+- 通过在命令中输入 -m <模块> 来引入外部模块。
+- 如果使用了扩展匹配条件，又没有使用 -m，则默认引入和 -p 协议同名的外部模块进行处理。
+
+这里只介绍部分扩展模块，关于更多常用扩展模块，请参考 [iptables 匹配条件总结之二（常用扩展模块）](https://www.zsythink.net/archives/1564)
+
+### TCP 扩展模块
+
+TCP 模块可以进行在简单匹配基础上，进行 TCP 协议端口的匹配：
+
+```sh
+# 匹配源端口 -m tcp --sport <源端口>
+# 端口可以指定连续范围
+$ iptables ... -m tcp --sport <源端口>
+$ iptables -t filter -I OUTPUT -d 192.168.1.146 -p tcp -m tcp --sport 22 -j REJECT
+$ iptables -t filter -I OUTPUT -d 192.168.1.146 -p tcp -m tcp --sport 22:80 -j REJECT
+$ iptables -t filter -I OUTPUT -d 192.168.1.146 -p tcp --sport 22 -j REJECT
+
+# 匹配目标端口 -m tcp --dport <目标端口>
+# 端口可以指定连续范围
+$ iptables ... -m tcp --dport <目标端口>
+$ iptables -t filter -I INPUT -s 192.168.1.146 -p tcp -m tcp --dport 22 -j REJECT
+$ iptables -t filter -I INPUT -s 192.168.1.146 -p tcp -m tcp --dport 22:80 -j REJECT
+$ iptables -t filter -I INPUT -s 192.168.1.146 -p tcp --dport 22:80 -j REJECT
+```
+
+除了端口外，还可以进行 TCP 协议标识的匹配。先看一下 TCP 协议标识：
+
+![](assets/TCP-FLAGS3.png)
+
+TCP 模块的协议标识匹配：
+
+```sh
+# 匹配 TCP 协议标识 -m tcp --tcp-flags <需要匹配的 TCP 标识> <匹配 TCP 标识为 1 的>
+$ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --tcp-flags SYN,ACK,FIN,RST,URG,PSH SYN -j REJECT
+# 上面这个代表匹配条件：数据包的 SYN 为 1，而 ACK、FIN、RST、URG、PSH 标识位为 0
+$ iptables -t filter -I OUTPUT -p tcp -m tcp --sport 22 --tcp-flags SYN,ACK,FIN,RST,URG,PSH SYN,ACK -j REJECT
+$ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --tcp-flags ALL SYN -j REJECT
+$ iptables -t filter -I OUTPUT -p tcp -m tcp --sport 22 --tcp-flags ALL SYN,ACK -j REJECT
+
+# 匹配 TCP 新建连接的请求报文 -m tcp --syn
+# 等价于 –tcp-flags SYN,RST,ACK,FIN SYN
+$ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --syn -j REJECT
+```
+
+### UDP 扩展模块
+
+和 TCP 扩展模块基本一致，不过适用于 UDP 协议：
+
+```sh
+# --sport 指定源端口
+# --dport 指定目标端口
+iptables -t filter -I INPUT -p udp -m udp --dport 137 -j ACCEPT
+iptables -t filter -I INPUT -p udp -m udp --dport 137:157 -j ACCEPT
+```
+
+### ICMP 扩展模块
+
+ICMP 模块适用于 ping 命令。首先看一下 ICMP 协议中最重要的两个字段：type 和 code，用于标识 ICMP 协议数据包的作用或错误提示等。
+
+![](assets/050117_1112_4.png)
+
+type 标识数据包的作用，code 是对其进行具体的细分。例如：
+
+- ping 请求的数据包，type=8/code=0；
+- ping 正常响应的数据包，type=0/code=0；
+- ping 响应主机不可到达，type=3/code=1；
+
+在 iptables 中，使用 `--icmp-type <type>/<code>` 进行数据包的匹配：
+
+```sh
+# 如果 type 下只有个一类型，那么是可以省略 code 部分的
+iptables -t filter -I INPUT -p icmp -m icmp --icmp-type 8/0 -j REJECT
+iptables -t filter -I INPUT -p icmp --icmp-type 8 -j REJECT
+
+iptables -t filter -I OUTPUT -p icmp -m icmp --icmp-type 0/0 -j REJECT
+iptables -t filter -I OUTPUT -p icmp --icmp-type 0 -j REJECT
+```
