@@ -117,6 +117,7 @@ $ iptables -D INPUT -s 192.168.1.146 -j DROP
 
 # 修改默认策略。当没有任何一个匹配时，将执行 action
 $ iptables -t [<table>] -P <chain> <action>
+$ iptables -t filter -P INPUT ACCEPT
 
 # 对 iptables 的修改，在节点重启后会失效，因此对于确认的修改应该进行保存
 $ service iptables save                                     # CentOS 6
@@ -197,6 +198,10 @@ $ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --syn -j REJECT
 ```
 
 ### iptables 自定义链
+
+用户可以自定义链，并将自定义链挂在到默认链上，当匹配条件时，可以转交给自定义链来进行处理。
+
+这种方式的目的是为了避免规则太多，难以进行管理。通过自定义链，从业务维度管理规则。
 
 ```sh
 # 查询自定义链（和查询默认链是一样的）
