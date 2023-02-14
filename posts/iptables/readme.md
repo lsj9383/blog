@@ -230,6 +230,31 @@ $ iptables -X <自定义链>
 $ iptables -X IN_WEB
 ```
 
+### NAT 配置
+
+NAT 分为两种，其目的是不同的：
+
+NAT 种类 | 描述 | 应用场景
+-|-|-
+SNAT | 源地址转换 |
+DNAT | 目标地址转换 |
+
+**注意：**
+
+- 对于一个请求响应而言，必然会同时涉及到 SNAT 和 DNAT。例如：
+  - 请求时做了 SNAT，修改了源地址从 A 到 B，那么对于响应报文的目标地址也会进行修改，即从 B 到 A，这样就做了 DNAT
+- 我们一般说的 SNAT 或是 DNAT，是从请求的角度而言的，如果请求的数据包修改了源地址，则被称为 SNAT，如果请求的数据包修改了目标地址，则称为 DNAT。
+
+SNAT：
+
+```sh
+```
+
+DNAT：
+
+```sh
+```
+
 ## 数据包流向
 
 iptables 的路由配置可以发生在多个“关卡”（钩子），整个包的流向和关卡的关系如下图所示：
@@ -282,7 +307,7 @@ ACCEPT | 允许数据包通过。
 DROP | 直接丢弃数据包，不给任何回应信息，这时候客户端会感觉自己的请求泥牛入海了，过了超时时间才会有反应。
 REJECT | 拒绝数据包通过，必要时会给数据发送端一个响应的信息，客户端刚请求就会收到拒绝的信息。
 SNAT | 源地址转换，解决内网用户用同一个公网地址上网的问题。
-MASQUERADE | 是 SNAT 的一种特殊形式，适用于动态的、临时会变的ip上。
+MASQUERADE | 是 SNAT 的一种特殊形式，适用于动态的、临时会变的 IP 上。
 DNAT | 目标地址转换。
 REDIRECT | 在本机做端口映射。
 LOG | 在 /var/log/messages 文件中记录日志信息，然后将数据包传递给下一条规则，也就是说除了记录以外不对数据包做任何其他操作，仍然让下一条规则去匹配。
@@ -370,3 +395,19 @@ iptables -t filter -I INPUT -p icmp --icmp-type 8 -j REJECT
 iptables -t filter -I OUTPUT -p icmp -m icmp --icmp-type 0/0 -j REJECT
 iptables -t filter -I OUTPUT -p icmp --icmp-type 0 -j REJECT
 ```
+
+## 自定义链
+
+## 网络防火墙
+
+综上，要将 iptables 主机作为网络防火墙时，只能在 **FORWARD** 链中进行对 filter 表进行过滤配置。
+
+## NAT
+
+iptables 一个特别广泛应用就是 NAT。
+
+首先什么是 NAT？
+
+> NAT 是 Network Address Translation的缩写，译为“网络地址转换”。NAT 说白了就是修改报文的 IP 地址，NAT 功能通常会被集成到路由器、防火墙、或独立的 NAT 设备中。
+
+
