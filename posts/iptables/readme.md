@@ -272,6 +272,37 @@ $ iptables -t nat -I PREROUTING -d 192.168.1.146 -p tcp --dport 8080 -j DNAT --t
 $ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
 ```
 
+### 路由表查询
+
+这里分为两种路由表：
+
+- IP 协议的路由表，使用 `route` 命令查询，主要是根据 IP 查询下一跳的 IP 地址。
+- ARP 协议的路由表，使用 `arp` 命令查询，主要是确定 IP 地址在直连网段时，查询其 MAC 地址以直接发送。
+
+```sh
+# 查询路由表
+# 第一条记录，代表发送给 10.0.8.x 的数据包，就在本网段，直接通过 eth0 发送给对应的主机。
+#   即直接通过 ARP 表查询到对应 IP 的 MAC 地址进行组包。
+# 第二条记录，代表发送给其他 IP 的数据包，转发送给网关 10.0.8.1，由网关进行路由。
+#   即通过 ARP 表查询到对应的网关的 MAC 地址，传输给网关，网关则会根据 IP 包中的目标地址进行判断并进一步路由。
+$ route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+10.0.8.0        0.0.0.0         255.255.252.0   U     0      0        0 eth0
+0.0.0.0         10.0.8.1        0.0.0.0         UG    100    0        0 eth0
+
+# 查询到某一个 IP 时，如何进行路由
+$ ip route get 8.8.8.8
+8.8.8.8 via 10.0.8.1 dev eth0 src 10.0.8.10 uid 1002
+
+# 查询 ARP 表
+$ arp -n
+Address                  HWtype  HWaddress           Flags Mask            Iface
+169.254.0.34             ether   fe:ee:4d:f6:f2:fa   C                     eth1
+169.254.128.8            ether   fe:ee:4d:f6:f2:fa   C                     eth1
+9.134.13.236             ether   fe:ee:4d:f6:f2:fa   C                     eth1
+```
+
 ## 数据包流向
 
 iptables 的路由配置可以发生在多个“关卡”（钩子），整个包的流向和关卡的关系如下图所示：
@@ -486,3 +517,4 @@ iptables 一个特别广泛应用就是 NAT。
 
 1. [朱双印 iptables](https://www.zsythink.net/archives/category/%e8%bf%90%e7%bb%b4%e7%9b%b8%e5%85%b3/iptables)
 1. [iptables - default action at the end of user-defined chain](https://unix.stackexchange.com/questions/552075/iptables-default-action-at-the-end-of-user-defined-chain)
+1. [IP 路由原理](https://fasionchan.com/network/ip/routing/)
