@@ -23,6 +23,13 @@ IPTables 主要分为两个部分：
 
 ![](assets/021217_0051_6.png)
 
+一些相关命令：
+
+```sh
+# 查询路由表
+$ route -n
+```
+
 ### iptables 规则查询
 
 ```sh
@@ -199,14 +206,14 @@ $ iptables -t filter -I INPUT -p tcp -m tcp --dport 22 --syn -j REJECT
 
 ### iptables 自定义链
 
-用户可以自定义链，并将自定义链挂在到默认链上，当匹配条件时，可以转交给自定义链来进行处理。
+用户可以自定义链，并将自定义链挂在到默认链上，当匹配条件时，可以转交给自定义链来进行处理：
 
-这种方式的目的是为了避免规则太多，难以进行管理。通过自定义链，从业务维度管理规则。
+![](assets/custom-chain.drawio.png)
 
 ```sh
 # 查询自定义链（和查询默认链是一样的）
 $ iptables -t <table> -L <自定义链>
-$ iptables -t filter -N IN_WEB
+$ iptables -t filter -L IN_WEB
 
 # 创建自定义链，并指定其拥有的 table
 # 如果一个自定义链作用了多个 table，则更换 table 进行创建命令的执行
@@ -214,20 +221,16 @@ $ iptables -t <table> -N <自定义链>
 $ iptables -t filter -N IN_WEB
 $ iptables -t filter -N IN_WEB; iptables -t raw -N IN_WEB
 
-# 将自定义链添加到默认链中
+# 将自定义链添加到默认链中（其实是将<表>添加过去）
 # 本质上将匹配条件的数据包，交给默认链处理
 $ iptables -t filter -I INPUT -p tcp --dport 80 -j IN_WEB
-
-# 重命名自定义链
-$ iptables -E <原链名> <新链名>
-$ iptables -E IN_WEB WEB
 
 # 删除自定义链
 # 删除需要满足俩条件：
 #  - 自定义链没有被引用
 #  - 自定义链中没有任何规则
-$ iptables -X <自定义链>
-$ iptables -X IN_WEB
+$ iptables -t <table> X <自定义链>
+$ iptables -t nat -X IN_WEB
 ```
 
 ### NAT 配置
@@ -245,14 +248,28 @@ DNAT | 目标地址转换 |
   - 请求时做了 SNAT，修改了源地址从 A 到 B，那么对于响应报文的目标地址也会进行修改，即从 B 到 A，这样就做了 DNAT
 - 我们一般说的 SNAT 或是 DNAT，是从请求的角度而言的，如果请求的数据包修改了源地址，则被称为 SNAT，如果请求的数据包修改了目标地址，则称为 DNAT。
 
-SNAT：
+
+NAT 命令速记：
 
 ```sh
-```
+# 如果需要主机支持 NAT 功能，则需要先开启转发功能：
+$ echo 1 > /proc/sys/net/ipv4/ip_forward
 
-DNAT：
+# SNAT：对于匹配条件的数据包，将其源 IP 转换为指定的源 IP。
+$ iptables -t nat -A POSTROUTING <匹配条件> -j SNAT --to-source <修改后的数据包源 IP>
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
 
-```sh
+# MASQUERADE：一种特殊的 SNAT，不用写死 --to-source。
+# 为了避免每次本机 IP 修改后，都要调整 --to-source 源 IP，则可以使用 MASQUERADE，支持动态对应网卡上的 IP
+# 避免写死 --to-source 修改后的源 IP
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -o <网卡> -j MASQUERADE
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -o eth0 -j MASQUERADE
+
+# DNAT：对于匹配条件的数据包，将其目标 IP 和端口转换为指定的目标 IP和端口。
+$ iptables -t nat -I PREROUTING -p tcp <匹配条件> -j DNAT --to-destination <修改后的数据包目标IP:端口号>
+$ iptables -t nat -I PREROUTING -d 192.168.1.146 -p tcp --dport 8080 -j DNAT --to-destination 10.1.0.1:80
+# DNAT 比较特殊，需要配置对应的 SNAT，它无法支持自动的 SNAT
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
 ```
 
 ## 数据包流向
@@ -398,6 +415,61 @@ iptables -t filter -I OUTPUT -p icmp --icmp-type 0 -j REJECT
 
 ## 自定义链
 
+这种方式的目的是为了避免规则太多，难以进行管理。通过自定义链，从业务维度管理规则。
+
+和默认链不同的是，自定义链并不能直接使用，而是需要通过通过默认链进行引用才可以进行使用，具体而言需要在默认链中将匹配条件的行为关联到自定义链上，进而将数据包的处理转交给自定义链：
+
+![](assets/custom-chain.drawio.png)
+
+创建自定义链：
+
+```sh
+# iptables -t <表> -N <自定义链>
+$ iptables -t filter -N IN_WEB
+
+# 打印出来括号中的是引用次数
+$ iptables -t filter -L IN_WEB
+Chain IN_WEB (0 references)
+target     prot opt source               destination       
+```
+
+**注意：**
+
+- 链的引用次数是针对其中的表的。
+- 链的默认策略为 RETURN，且不可修改。可参考 [iptables - default action at the end of user-defined chain](https://unix.stackexchange.com/questions/552075/iptables-default-action-at-the-end-of-user-defined-chain)。
+
+添加自定义链到默认链中：
+
+```sh
+# 将自定义链添加到默认链中（其实是将<表>添加过去）
+# 本质上将匹配条件的数据包，交给默认链处理
+$ iptables -t filter -I INPUT -p tcp --dport 80 -j IN_WEB
+
+$ iptables -t filter -nvL INPUT
+Chain INPUT (policy ACCEPT 118 packets, 7153 bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 IN_WEB     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:80
+```
+
+对于不需要使用的自定义链可以进行删除，但需要满足俩条件：
+
+- 自定义链没有被引用
+- 自定义链中没有任何规则
+
+```sh
+$ iptables -t <table> X <自定义链>
+$ iptables -t nat -X IN_WEB
+iptables: Too many links.
+```
+
+自定义链还可以进行重命名：
+
+```sh
+# 重命名自定义链
+$ iptables -t <table> -E <原链名> <新链名>
+$ iptables -t filter -E IN_WEB WEB
+```
+
 ## 网络防火墙
 
 综上，要将 iptables 主机作为网络防火墙时，只能在 **FORWARD** 链中进行对 filter 表进行过滤配置。
@@ -410,4 +482,7 @@ iptables 一个特别广泛应用就是 NAT。
 
 > NAT 是 Network Address Translation的缩写，译为“网络地址转换”。NAT 说白了就是修改报文的 IP 地址，NAT 功能通常会被集成到路由器、防火墙、或独立的 NAT 设备中。
 
+## 参考文献
 
+1. [朱双印 iptables](https://www.zsythink.net/archives/category/%e8%bf%90%e7%bb%b4%e7%9b%b8%e5%85%b3/iptables)
+1. [iptables - default action at the end of user-defined chain](https://unix.stackexchange.com/questions/552075/iptables-default-action-at-the-end-of-user-defined-chain)
