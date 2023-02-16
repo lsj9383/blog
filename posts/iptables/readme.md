@@ -21,7 +21,7 @@ IPTables 主要分为两个部分：
 
 为了方便快速回忆概念和操作，先给出常用的概念和相关命令。
 
-![](assets/021217_0051_6.png)
+![](assets/iptables-profile.drawio.png)
 
 一些相关命令：
 
@@ -513,8 +513,73 @@ iptables 一个特别广泛应用就是 NAT。
 
 > NAT 是 Network Address Translation的缩写，译为“网络地址转换”。NAT 说白了就是修改报文的 IP 地址，NAT 功能通常会被集成到路由器、防火墙、或独立的 NAT 设备中。
 
-## 参考文献
+## 附录：路由表
+
+对于 iptables 而言，经常会作为路由器、防火墙、NAT 进行使用，因此会涉及到数据包转发，而数据包转发则和路由表息息相关，这里对路由表进行简单介绍。
+
+假设存在两个网段：
+
+- 192.168.1.x
+- 192.168.2.x
+
+需要打通这两个网段，中间使用了路由器，路由器的不同网络设备对应不同的网段：
+
+![](assets/94ddcdcc6fa3701a299c95c67e0480725b8ca5e8.png)
+
+要打通 192.168.1.x 和 192.168.2.x 之间的网络，则需要配置好他们之间的路由表。
+
+从 192.168.1.x 的视角来看：
+
+- 本地网络通信：对于发往 192.168.1.x 的数据包，可以直接通过 ARP 协议，拿到 MAC 地址，进行传输。
+- 跨网络通信：对于发往 192.168.2.x 的数据包，需要到网关 192.168.1.1 进行转发。
+
+那么对于 192.168.1.x 的机器，需要配置路由表：
+
+```sh
+$ route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+192.168.1.0     0.0.0.0         255.255.255.0   U     0      0        0 eth0
+192.168.2.0     192.168.1.1     255.255.255.0   UG    0      0        0 eth0
+```
+
+对于 192.168.2.x 的机器，需要配置路由表：
+
+```sh
+$ route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+192.168.2.0     0.0.0.0         255.255.255.0   U     0      0        0 eth0
+192.168.1.0     192.168.2.1     255.255.255.0   UG    0      0        0 eth0
+```
+
+对于网关的机器，需要有路由表：
+
+```sh
+$ route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+192.168.1.0     0.0.0.0         255.255.255.0   U     0      0        0 eth1
+192.168.2.0     0.0.0.0         255.255.255.0   U     0      0        0 eth2
+```
+
+且同时配置了 ip 转发：
+
+```sh
+$ echo 1 > /proc/sys/net/ipv4/ip_forward
+```
+
+对于本地网络通信：
+
+![](assets/ff30de0326a6eb1c6f021e35b4a4f3ea1259b159.png)
+
+对于跨网络通信：
+
+![](assets/cdf786d6122438286fc56bd418afc03d4a60991f.png)
+
+## 附录：参考文献
 
 1. [朱双印 iptables](https://www.zsythink.net/archives/category/%e8%bf%90%e7%bb%b4%e7%9b%b8%e5%85%b3/iptables)
 1. [iptables - default action at the end of user-defined chain](https://unix.stackexchange.com/questions/552075/iptables-default-action-at-the-end-of-user-defined-chain)
 1. [IP 路由原理](https://fasionchan.com/network/ip/routing/)
+1. [天天讲路由，那 Linux 路由到底咋实现的！？](https://www.51cto.com/article/698945.html)
