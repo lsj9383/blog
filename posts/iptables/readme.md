@@ -563,7 +563,7 @@ Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
 192.168.2.0     0.0.0.0         255.255.255.0   U     0      0        0 eth2
 ```
 
-且同时配置了 ip 转发：
+且同时配置了 ip 转发（如果不开启路由转发，则会直接丢弃目标不属于自己的数据包）：
 
 ```sh
 $ echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -576,6 +576,38 @@ $ echo 1 > /proc/sys/net/ipv4/ip_forward
 对于跨网络通信：
 
 ![](assets/cdf786d6122438286fc56bd418afc03d4a60991f.png)
+
+我们会有多份路由表，可以进行查询：
+
+```sh
+$ cat /etc/iproute2/rt_tables
+255     local
+254     main
+253     default
+0       unspec
+```
+
+指定路由表进行查询：
+
+```sh
+$ ip route list table local
+broadcast 9.134.0.0 dev eth1  proto kernel  scope link  src 9.134.9.104 
+local 9.134.9.104 dev eth1  proto kernel  scope host  src 9.134.9.104 
+broadcast 9.134.15.255 dev eth1  proto kernel  scope link  src 9.134.9.104 
+broadcast 127.0.0.0 dev lo  proto kernel  scope link  src 127.0.0.1 
+local 127.0.0.0/8 dev lo  proto kernel  scope host  src 127.0.0.1 
+local 127.0.0.1 dev lo  proto kernel  scope host  src 127.0.0.1 
+```
+
+如果只看 main 路由表，可以通过更简单的命令：
+
+```sh
+$ route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+0.0.0.0         9.134.0.1       0.0.0.0         UG    0      0        0 eth1
+9.134.0.0       0.0.0.0         255.255.240.0   U     0      0        0 eth1
+```
 
 ## 附录：参考文献
 
