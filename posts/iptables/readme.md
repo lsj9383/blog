@@ -503,7 +503,16 @@ $ iptables -t filter -E IN_WEB WEB
 
 ## 网络防火墙
 
-综上，要将 iptables 主机作为网络防火墙时，只能在 **FORWARD** 链中进行对 filter 表进行过滤配置。
+综上，要将 iptables 主机作为网络防火墙时，即主机是作为 IP 包转发的角色存在，其本质是一个路由器。此时，在主机中，数据包经过的路径为：
+
+```sh
+数据包入口 ---> PREROUTING ---> FORWARD ---> POSTROUTING ---> 数据包出口
+```
+
+很明显，网络防火墙要对非法数据包进行过滤，而只有 **FORWARD** 才具有 filter 表，因此：
+
+- 只能在 **FORWARD** 链中进行对 filter 表进行过滤配置。
+- 对于 PREROUTING 和 POSTROUTING 更多是进行 NAT 操作的。
 
 ## NAT
 
@@ -512,6 +521,59 @@ iptables 一个特别广泛应用就是 NAT。
 首先什么是 NAT？
 
 > NAT 是 Network Address Translation的缩写，译为“网络地址转换”。NAT 说白了就是修改报文的 IP 地址，NAT 功能通常会被集成到路由器、防火墙、或独立的 NAT 设备中。
+
+NAT 只会转换 IP 地址，能够对端口进行转换的叫做 NAPT。Linux iptables 自动支持 NAPT。
+
+### 场景一：SNAT
+
+SNAT 是对数据包中的源 IP 进行修改，通常用于一个网关代理内网中的所有机器访问外部网络。从网关代理的角度看，是一种正向代理技术（代理客户端）。
+
+SNAT 只能发生在两个地方：
+
+发生位置 | 作用
+-|-
+POSTROUTING | 数据包要出网关了，修改 IP 包中的源地址，以告诉外部网络是我网关发出的数据包。
+INPUT | 数据包要被主机处理了，修改 IP 包中的源地址，让主机上层以修改后的 IP 进行处理。
+
+这是一个 SNAT 的示例，我们希望 A 和 B 通过在 C（SNAT），可以访问 D：
+
+![](assets/snat-profile.drawio.png)
+
+在代理网关将数据包发送出去前，将数据包中的源 IP 修改为 **192.168.1.146**：
+
+```sh
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
+```
+
+当我们在 A 机器上执行：`curl "http://192.168.1.147:80"` 时，会执行一下请求和响应动作：
+
+![](assets/snat-send-recv.drawio.png)
+
+在 NAT 处会记录一个路由表，当收到响应回包时，会根据源和目标端口，反向匹配出内网 IP。
+
+SNAT 有一个特殊的场景，A 和 B 两个主机，完全可能使用相同的端口号访问同一个 D，那么根据路由表是无法反向推出回包给 A 还是 B 的：
+
+![](assets/snat-problem.drawio.png)
+
+在 Linux 的 iptables 中会自动使用 NAPT 技术，会对重复的端口做一个映射，方便对回包做处理：
+
+> iptables will always try to avoid making any port alterations if possible, but if two hosts try to use the same ports, iptables will map one of them to another port.
+
+![](assets/snat-pat.drawio.png)
+
+### 场景二：DNAT
+
+DNAT 是对数据包中的 目标 IP 进行修改，通常用于一个网关代理内网中的机器被外部访问。从网关代理的角度看，是一种反向代理技术（代理服务器）。
+
+发生位置 | 作用
+-|-
+PREROUTING | 数据包在路由策略之前，将目标 IP 进行修改，以此将发往自己的数据包，转发给其他主机。
+
+反向代理的网关，收到数据包中目标 IP 是自己，需要将其修改为内网其他主机的 IP，因此要在进行路由策略之前进行修改：
+
+```sh
+$ iptables -t nat -A PREROUTING -p tcp -d 192.168.1.146 --dport 801 -j DNAT --to-destination 10.1.0.1:80
+```
 
 ## 附录：路由表
 
@@ -612,6 +674,11 @@ Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
 ## 附录：参考文献
 
 1. [朱双印 iptables](https://www.zsythink.net/archives/category/%e8%bf%90%e7%bb%b4%e7%9b%b8%e5%85%b3/iptables)
+1. [Iptables Tutorial 1.2.2](https://www.frozentux.net/iptables-tutorial/iptables-tutorial.html)
 1. [iptables - default action at the end of user-defined chain](https://unix.stackexchange.com/questions/552075/iptables-default-action-at-the-end-of-user-defined-chain)
 1. [IP 路由原理](https://fasionchan.com/network/ip/routing/)
 1. [天天讲路由，那 Linux 路由到底咋实现的！？](https://www.51cto.com/article/698945.html)
+1. [Why does everybody use MASQUERADE/SNAT instead of NAPT/PAT?](https://serverfault.com/questions/1083523/why-does-everybody-use-masquerade-snat-instead-of-napt-pat)
+1. [SNAT TARGET](https://www.frozentux.net/iptables-tutorial/iptables-tutorial.html#SNATTARGET)
+1. [How does Pinging from a private IP behind NAT to a public IP work](https://serverfault.com/questions/744229/how-does-pinging-from-a-private-ip-behind-nat-to-a-public-ip-work)
+1. [ICMP 报文如何通过 NAT 来地址转换](https://blog.csdn.net/sinat_33822516/article/details/81088724)
