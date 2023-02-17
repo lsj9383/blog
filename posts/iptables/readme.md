@@ -568,11 +568,17 @@ DNAT 是对数据包中的 目标 IP 进行修改，通常用于一个网关代�
 发生位置 | 作用
 -|-
 PREROUTING | 数据包在路由策略之前，将目标 IP 进行修改，以此将发往自己的数据包，转发给其他主机。
+OUTPUT |
 
 反向代理的网关，收到数据包中目标 IP 是自己，需要将其修改为内网其他主机的 IP，因此要在进行路由策略之前进行修改：
 
 ```sh
+# DNAT
 $ iptables -t nat -A PREROUTING -p tcp -d 192.168.1.146 --dport 801 -j DNAT --to-destination 10.1.0.1:80
+
+# 和请求的 SNAT 不同，如果请求是 DNAT，那么必须要配置针对响应的 SNAT/MASQUERADE
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j MASQUERADE -o eth0
 ```
 
 ## 附录：路由表
