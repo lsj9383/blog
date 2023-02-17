@@ -242,6 +242,10 @@ DNAT | 目标地址转换 | 反向代理，代理私有网络中的服务器被�
 - 如上图所示，无论是 SNAT 或是 DNAT，对于一个请求响应而言，必然会同时涉及到 SNAT 和 DNAT。我们说到 SNAT 或是 DNAT 更多根据的是请求方向。
 - iptables 的 SNAT 如果遇到端口冲突的情况，会自动进行 NAPT，即在网关处对端口进行映射。
 
+iptables 的 SNAT 和 DNAT 的发生位置（如果不配置在对应的位置，iptables 会提示配置失败）：
+
+![](assets/iptables-nat.drawio.png)
+
 NAT 命令速记：
 
 ```sh
