@@ -561,6 +561,12 @@ SNAT 有一个特殊的场景，A 和 B 两个主机，完全可能使用相同�
 
 ![](assets/snat-pat.drawio.png)
 
+此外 SNAT 还有一个问题，因为这里会写死网关处的 IP，但是网关的 IP 可能是动态的，可变化的，因此为了方便我们只将 SNAT 和网卡设备进行绑定，而不和具体的 IP 绑定，以此实现动态 SNAT：
+
+```sh
+$ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j MASQUERADE -o eth0
+```
+
 ### 场景二：DNAT
 
 DNAT 是对数据包中的 目标 IP 进行修改，通常用于一个网关代理内网中的机器被外部访问。从网关代理的角度看，是一种反向代理技术（代理服务器）。
@@ -570,16 +576,35 @@ DNAT 是对数据包中的 目标 IP 进行修改，通常用于一个网关代�
 PREROUTING | 数据包在路由策略之前，将目标 IP 进行修改，以此将发往自己的数据包，转发给其他主机。
 OUTPUT |
 
-反向代理的网关，收到数据包中目标 IP 是自己，需要将其修改为内网其他主机的 IP，因此要在进行路由策略之前进行修改：
+这是一个 DNAT 的示例，外网的客户端 D，需要请求内网的 A：
+
+![](assets/dnat-profile.drawio.png)
+
+C 此时作为反向代理的网关，收到数据包中目标 IP 是自己，需要将其修改为内网其他主机的 IP，因此要在进行路由策略之前进行修改：
 
 ```sh
 # DNAT
-$ iptables -t nat -A PREROUTING -p tcp -d 192.168.1.146 --dport 801 -j DNAT --to-destination 10.1.0.1:80
+$ iptables -t nat -A PREROUTING -p tcp -d 192.168.1.146 --dport 80 -j DNAT --to-destination 10.1.0.1:80
+```
 
-# 和请求的 SNAT 不同，如果请求是 DNAT，那么必须要配置针对响应的 SNAT/MASQUERADE
+添加该 DNAT 配置后，D 去请求 A 的数据，即可顺利通过：
+
+![](assets/dnat-send-recv.drawio.png)
+
+但是这存在一个问题，如果 B 通过 C 的公网 IP 访问 A（虽然是通过公网 IP，但是因为路由表的原因，还是会走到 C 的内网网卡），则无法访问通。此时的数据报流向为：
+
+![](assets/dnat-problem.drawio.png)
+
+因此，解决方法是添加一个 SNAT/MASQUERADE 记录，促使将源 IP 修改为 C 的内网 IP，通过 C 返回数据包：
+
+```sh
 $ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
 $ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j MASQUERADE -o eth0
 ```
+
+最终数据包传输路径如下：
+
+![](assets/dnat-snat.drawio.png)
 
 ## 附录：路由表
 
