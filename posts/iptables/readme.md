@@ -23,13 +23,6 @@ IPTables 主要分为两个部分：
 
 ![](assets/iptables-profile.drawio.png)
 
-一些相关命令：
-
-```sh
-# 查询路由表
-$ route -n
-```
-
 ### iptables 规则查询
 
 ```sh
@@ -237,17 +230,17 @@ $ iptables -t nat -X IN_WEB
 
 NAT 分为两种，其目的是不同的：
 
-NAT 种类 | 描述 | 应用场景
+NAT 种类 | 描述 | 常见应用场景
 -|-|-
-SNAT | 源地址转换 |
-DNAT | 目标地址转换 |
+SNAT | 源地址转换 | 正向代理，代理私有网络中的客户端访问外网服务器。
+DNAT | 目标地址转换 | 反向代理，代理私有网络中的服务器被外网客户端访问。
+
+![](assets/nat-profile.drawio.png)
 
 **注意：**
 
-- 对于一个请求响应而言，必然会同时涉及到 SNAT 和 DNAT。例如：
-  - 请求时做了 SNAT，修改了源地址从 A 到 B，那么对于响应报文的目标地址也会进行修改，即从 B 到 A，这样就做了 DNAT
-- 我们一般说的 SNAT 或是 DNAT，是从请求的角度而言的，如果请求的数据包修改了源地址，则被称为 SNAT，如果请求的数据包修改了目标地址，则称为 DNAT。
-
+- 如上图所示，无论是 SNAT 或是 DNAT，对于一个请求响应而言，必然会同时涉及到 SNAT 和 DNAT。我们说到 SNAT 或是 DNAT 更多根据的是请求方向。
+- iptables 的 SNAT 如果遇到端口冲突的情况，会自动进行 NAPT，即在网关处对端口进行映射。
 
 NAT 命令速记：
 
@@ -256,6 +249,7 @@ NAT 命令速记：
 $ echo 1 > /proc/sys/net/ipv4/ip_forward
 
 # SNAT：对于匹配条件的数据包，将其源 IP 转换为指定的源 IP。
+# SNAT 只能用于 POSTROUTING 和 INPUT
 $ iptables -t nat -A POSTROUTING <匹配条件> -j SNAT --to-source <修改后的数据包源 IP>
 $ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
 
@@ -267,10 +261,16 @@ $ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -o eth0 -j MASQUERADE
 
 # DNAT：对于匹配条件的数据包，将其目标 IP 和端口转换为指定的目标 IP和端口。
 $ iptables -t nat -I PREROUTING -p tcp <匹配条件> -j DNAT --to-destination <修改后的数据包目标IP:端口号>
-$ iptables -t nat -I PREROUTING -d 192.168.1.146 -p tcp --dport 8080 -j DNAT --to-destination 10.1.0.1:80
-# DNAT 比较特殊，需要配置对应的 SNAT，它无法支持自动的 SNAT
+$ iptables -t nat -I PREROUTING -d 192.168.1.146 -p tcp --dport 80 -j DNAT --to-destination 10.1.0.1:80
+# DNAT 对于私网通过网关访问目标服务器，需要进行 SNAT
 $ iptables -t nat -A POSTROUTING -s 10.1.0.0/16 -j SNAT --to-source 192.168.1.146
 ```
+
+**注意：**
+
+- 为什么有时候 DNAT 需要配置 SNAT 才能跑通？请参考如下图示：
+
+![](assets/dnat-problem.drawio.png)
 
 ### 路由表查询
 
