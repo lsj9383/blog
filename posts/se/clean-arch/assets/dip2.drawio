@@ -1,0 +1,41 @@
+<mxfile host="app.diagrams.net" modified="2023-04-12T16:53:24.980Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36" etag="-_XgZ-7SeJiRCvbhl5Tm" version="21.1.4" type="device">
+  <diagram name="第 1 页" id="Iz5LkB3RKkY3cCKNPmEv">
+    <mxGraphModel dx="1050" dy="492" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="qLCYZfkB4Sp_9XOHlxZy-2" target="qLCYZfkB4Sp_9XOHlxZy-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-2" value="Application" style="html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="170" y="190" width="110" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;endArrow=block;endFill=0;" edge="1" parent="1" source="qLCYZfkB4Sp_9XOHlxZy-3" target="qLCYZfkB4Sp_9XOHlxZy-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-3" value="Database" style="html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="380" y="270" width="110" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-4" value="" style="endArrow=none;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;curved=1;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="400" y="180" as="sourcePoint" />
+            <mxPoint x="280" y="390" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="330" y="180" />
+              <mxPoint x="330" y="390" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-5" value="Application 组件" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="280" y="150" width="90" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-6" value="Database 组件" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="324" y="350" width="90" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="qLCYZfkB4Sp_9XOHlxZy-7" value="«interface»&lt;br&gt;&lt;b&gt;App Database&lt;/b&gt;" style="html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="170" y="270" width="110" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
