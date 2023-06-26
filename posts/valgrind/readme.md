@@ -29,4 +29,5 @@ BBV | 这是一个实验性的 SimPoint 基本块向量生成器。对于从事�
 
 ## 目录
 
-- [Using and understanding the Valgrind core](valgrind-core.md)
+- [Valgrind 快速开始](quick-start.md)
+- [使用和理解 Valgrind](valgrind-core.md)
