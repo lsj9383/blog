@@ -31,3 +31,25 @@ BBV | 这是一个实验性的 SimPoint 基本块向量生成器。对于从事�
 
 - [Valgrind 快速开始](quick-start.md)
 - [使用和理解 Valgrind](valgrind-core.md)
+
+## 速记
+
+## 实践
+
+在阅读完 Valgrind 的相关基础内容后，在这里记录了 Valgrind 的相关实践。
+
+### Svrkit 的 Massif 堆分析
+
+```sh
+module=mmpaypersonalnegotiationweb
+binary=mmpaypersonalnegotiationweb
+
+# 停掉原本在运行的 Svrkit 模块
+$ /home/qspace/${module}/bin/${binary}Console pause
+
+# 启动 Valgrind Massif 进行堆分析
+$ valgrind --tool=massif --trace-children=yes /home/qspace/${module}/sbin/${binary} -i /home/qspace/${module}/etc/${binary}.conf -d
+
+# 杀掉 valgrind 进程，触发 massif 文件生成
+$ ps -ef | grep valgrind | grep -v color=auto | awk '{print $2}' | xargs kill -10
+```
