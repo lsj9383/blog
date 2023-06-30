@@ -1,5 +1,6 @@
 # 博客
 
+- [经济学](posts/economy/readme.md)
 - [Valgrind](posts/valgrind/readme.md)
 - [腾讯云](posts/tencent-cloud/readme.md)
 - [iptables 速记](posts/iptables/readme.md)
