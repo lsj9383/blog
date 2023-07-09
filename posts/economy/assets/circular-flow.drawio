@@ -1,0 +1,96 @@
+<mxfile host="app.diagrams.net" modified="2023-07-02T16:04:31.282Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36" etag="eTRd2H4w0mz0VlbbJ2Ti" version="21.3.8" type="device">
+  <diagram name="第 1 页" id="BBIP1NH82KdE1o-1UOBv">
+    <mxGraphModel dx="1877" dy="548" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#66CC00;strokeWidth=3;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-1" target="nF96lkj4Xuo2XhMTmHLL-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#FF9999;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-1" target="nF96lkj4Xuo2XhMTmHLL-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-1" value="&lt;b&gt;物品与服务市场&lt;/b&gt;&lt;br style=&quot;font-size: 16px;&quot;&gt;- 企业出售&lt;br style=&quot;font-size: 16px;&quot;&gt;- 家庭购买" style="ellipse;whiteSpace=wrap;html=1;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="250" y="90" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#66CC00;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-2" target="nF96lkj4Xuo2XhMTmHLL-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0;exitDx=0;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#FF9999;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-2" target="nF96lkj4Xuo2XhMTmHLL-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-2" value="&lt;b&gt;生产要素市场&lt;/b&gt;&lt;br style=&quot;font-size: 16px;&quot;&gt;- 家庭出售&lt;br style=&quot;font-size: 16px;&quot;&gt;- 企业购买" style="ellipse;whiteSpace=wrap;html=1;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="250" y="400" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#FF9999;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-3" target="nF96lkj4Xuo2XhMTmHLL-2">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="580" y="415" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#66CC00;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-3" target="nF96lkj4Xuo2XhMTmHLL-1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-3" value="&lt;b&gt;&amp;nbsp;家庭&lt;/b&gt;&lt;br&gt;&amp;nbsp; &amp;nbsp;- 购买并消费物品与服务&lt;br&gt;&amp;nbsp; &amp;nbsp;- 拥有并出售生产要素" style="rounded=0;whiteSpace=wrap;html=1;fontSize=16;align=left;" vertex="1" parent="1">
+          <mxGeometry x="530" y="220" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#66CC00;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-7" target="nF96lkj4Xuo2XhMTmHLL-2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#FF9999;" edge="1" parent="1" source="nF96lkj4Xuo2XhMTmHLL-7" target="nF96lkj4Xuo2XhMTmHLL-1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="110" y="175" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-7" value="&lt;b&gt;&amp;nbsp;企业&lt;/b&gt;&lt;br&gt;&amp;nbsp; &amp;nbsp;- 生产并出售物品与服务&lt;br&gt;&amp;nbsp; &amp;nbsp;- 雇佣并使用生产要素" style="rounded=0;whiteSpace=wrap;html=1;fontSize=16;align=left;" vertex="1" parent="1">
+          <mxGeometry x="-40" y="220" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-14" value="劳动、土地、资本" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="430" y="380" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-16" value="雇佣生产要素" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="119" y="382" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-18" value="物品与服务出售" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="119" y="180" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-19" value="物品与服务购买" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="414" y="180" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-20" value="支出" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="450" y="110" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-21" value="收益" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="90" y="109" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-23" value="工资、租金与利润" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="80" y="450" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-24" value="收入" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="440" y="450" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-25" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#FF9999;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-30" y="65" as="sourcePoint" />
+            <mxPoint x="30" y="64.88" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-26" value="投入与产出流向" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="30" y="50" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-27" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#66CC00;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-30" y="95" as="sourcePoint" />
+            <mxPoint x="30" y="94.88" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nF96lkj4Xuo2XhMTmHLL-28" value="货币流向" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="30" y="80" width="76" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
