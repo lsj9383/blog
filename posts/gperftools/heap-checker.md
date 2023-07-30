@@ -344,4 +344,3 @@ Total: 6 objects
 ## 参考文献
 
 1. [heap-checking using tcmalloc](https://gperftools.github.io/gperftools/heap_checker.html)
-1. [tcmalloc](https://github.com/google/tcmalloc)

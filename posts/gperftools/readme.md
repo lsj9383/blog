@@ -13,9 +13,9 @@ Gperftools 分析主要涵盖了以下三种工具：
 
 工具 | 名称 | 描述
 -|-|-
-heap-checker | 堆检查器 |
-heap-profiler | 堆分析器 |
-cpu-profiler | 堆分析器 |
+heap-checker | 堆检查器 | 专用的内存泄漏检测工具，对于分析传统的内存泄露很方便，而且可以很好的解决全局对象的析构检测问题。
+heap-profiler | 堆分析器 | 非常强大的堆分析工具，可以打印当前堆的分配和释放信息，不同时间段之间的堆变化等。
+cpu-profiler | CPU 分析器 |
 
 相比于 valgrind 而言，gperftools 的使用门槛真的要高很多，工具也没 valgrind 的丰富，但是有时候也不得不使用 gperftools：
 
