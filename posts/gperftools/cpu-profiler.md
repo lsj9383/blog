@@ -163,6 +163,25 @@ pprof 参数 | 描述
 
 ### 火焰图输出
 
+gperftools 输出火焰图还挺简单的，不过需要事先安装一个 [FlameGraph](https://github.com/brendangregg/FlameGraph)：
+
+```sh
+# 安装 FlameGraph
+$ git clone https://github.com/brendangregg/FlameGraph.git
+```
+
+然后就可以生成火焰图了：
+
+```sh
+# 将 prof 文件转换为 cbt
+# pprof --collapsed <binary> <cpu-profile> > tmp.cbt
+$ pprof --collapsed ./profiler_test my.prof > tmp.cbt
+
+# 将 cbt 转为火焰图
+# flamegraph.pl <cbt> > <flamegraph.svg>
+$ /home/arthurlu/FlameGraph/flamegraph.pl tmp.cbt > flamegraph.svg
+```
+
 ## 参考文献
 
 1. [CPU profiler](https://gperftools.github.io/gperftools/cpuprofile.html)
