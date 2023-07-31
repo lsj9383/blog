@@ -2,6 +2,7 @@
 
 - [Heap Checker](heap-checker.md)
 - [Heap Profiler](heap-profiler.md)
+- [CPU Profiler](cpu-profiler.md)
 
 ## 概览
 
@@ -31,22 +32,18 @@ cpu-profiler | CPU 分析器 |
 
 为了简化，下面的安装都是以 `root` 展开。
 
-### 安装 TCMalloc
+### 安装 gperftools
 
-tcmalloc 由于历史原因，存在两个库：
+gperftools 一共有两个组件：
 
-- [google/gperftools](https://github.com/gperftools/gperftools) 中的 tcmalloc 子集。
-- [google/tcmalloc](https://github.com/google/tcmalloc)。
+组件 | 描述
+-|-
+tcmalloc | 一个高效的内存分配组件，并且是 heap-checker 和 heap-profiler 的关键依赖。
+profiler | 进行 CPU 采样分析，是 heap-profiler 的关键依赖。
 
-`google/tcmalloc` 的 gperftools 的安装有个硬伤：对 GCC 的版本要求很高：
+这两个组件我们都需要进行安装，可参考官方的：[INSTALL](https://github.com/gperftools/gperftools/blob/master/INSTALL) 中的 **Basic Installation** 一节。
 
-> GCC 9.2 or higher is required.
-
-多数情况下我们没有这样的条件，因此我直接放弃了安装 `google/tcmalloc`。
-
-至于 google/gperftools 的 tcmalloc 的安装可以参考：[INSTALL](https://github.com/gperftools/gperftools/blob/master/INSTALL) 中的 **Basic Installation** 一节。
-
-对于 Linux64 的机器上，如果直接安装 tcmalloc 是会存在问题的，例如死锁：
+对于 Linux64 的机器上，如果直接安装 gperftools 可能是会存在问题的，例如死锁：
 
 > The cpu/heap profiler may be in the middle of malloc, holding some malloc-related locks when they invoke the stack unwinder.  The built-in stack unwinder may call malloc recursively, which may require the thread to acquire a lock it already holds: deadlock.
 
@@ -59,7 +56,7 @@ $ ./configure
 $ make
 ```
 
-接着，我们可以正式安装 tcmalloc 了：
+接着，我们可以正式安装 gperftools 了：
 
 ```sh
 # 获得 gperftools 安装包并进入目录
@@ -74,25 +71,34 @@ $ make
 $ make install
 ```
 
-这个时候，我们就可以链接动态库了（[leak.cpp](demo/leak.cpp)）：
+这个时候，我们就可以在编译二进制代码时，链接 gperftools 的库了：
 
-```sh
-# 一个示例：
-$ g++ leak.cpp -ltcmalloc -g -o leak
+场景 | 动态库链接示例 | 静态库链接示例
+-|-|-
+heap-checker | g++ **-Bdynamic** leak.cpp **-ltcmalloc** -g -o leak | g++ **-static** leak.cpp **-ltcmalloc -lunwind** -g -o leak
+heap-profiler | g++ **-Bdynamic** leak.cpp **-ltcmalloc** -g -o leak | g++ **-static** leak.cpp **-ltcmalloc -lunwind** -g -o leak
+cpu-profiler | g++ **-Bdynamic** leak.cpp **-lprofiler** -g -o leak | g++ **-static** leak.cpp **-lprofiler -lunwind** -g -o leak
+both | g++ **-Bdynamic** leak.cpp **-ltcmalloc_and_profiler** -g -o leak | g++ **-static** leak.cpp **-ltcmalloc_and_profiler -lunwind** -g -o leak
 
-# 若过没安装，会报错：
-#   /usr/bin/ld: cannot find -ltcmalloc
-#   collect2: error: ld returned 1 exit status
+**注意：**
 
-# 配置动态链接库地址并允许 heap-checker
-$ env LD_PRELOAD="/usr/local/lib/libtcmalloc.so" HEAPCHECK=normal ./leak
-```
+- 在 gperftools 在系统中安装好后，其库路径位于系统默认库 `/usr/local/lib/` 或 `/usr/lib/` 中。、
+- 静态库需要链接 libunwind.a，否定编译链接会失败。
+- 安装的库会包括同名的静态库和动态库，例如：
+  ```sh
+  libtcmalloc.a
+  libtcmalloc.so -> libtcmalloc.so.4.5.5
+  libtcmalloc.so.4.5.5
+  ```
+  - 通过 `-Bdynamic` 可以指定使用动态库。
+  - 通过 `-static` 可以指定使用静态库。
+  - 如果省略该标识，默认使用的是**动态库**，可参考：[gcc](https://www.rapidtables.com/code/linux/gcc/gcc-l.html)。
 
 ### 安装 pprof
 
 安装 pprof 请参考：[google/pprof](https://github.com/google/pprof)。
 
-安装 pprof 完成后，请检查 PPROF_PATH 环境变量是否正确，如果不正确或没有配置，请进行配置：
+在安装 pprof 完成后，请检查 PPROF_PATH 环境变量是否正确，如果不正确或没有配置，请进行配置：
 
 ```sh
 # 先检查下 pprof 路径
@@ -175,7 +181,20 @@ Total: 5 objects
        0   0.0% 100.0%        5 100.0% test /data/.../test/heap_checker_test.cc:14
 ```
 
-## 参考文献
+## 附录：痛苦的 tcmalloc 安装
+
+tcmalloc 由于历史原因，存在两个库：
+
+- [google/gperftools](https://github.com/gperftools/gperftools) 中的 tcmalloc 子集。
+- [google/tcmalloc](https://github.com/google/tcmalloc)。
+
+`google/tcmalloc` 的 gperftools 的安装有个硬伤：对 GCC 的版本要求很高：
+
+> GCC 9.2 or higher is required.
+
+多数情况下我们没有这样的条件，同时，google/tcmalloc 中没有 profiler 组件，无法作 cpu profile，因此我直接放弃了安装 `google/tcmalloc`。
+
+## 附录：参考文献
 
 1. [gperftools](https://gperftools.github.io/gperftools/)
 1. [gperftools/gperftools](https://github.com/gperftools/gperftools)
